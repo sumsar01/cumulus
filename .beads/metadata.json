@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "server",
+  "dolt_database": "aws_tui",
+  "project_id": "530cb9c1-c625-4d9a-913a-151438255db1"
+}
