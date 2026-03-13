@@ -1,0 +1,133 @@
+package dynamodb
+
+import (
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"os"
+
+	ddbtypes "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/sumsar01/cumulus/internal/ui"
+)
+
+// DetailModel renders the full JSON of a single DynamoDB item in a scrollable
+// viewport.
+type DetailModel struct {
+	viewport  viewport.Model
+	item      map[string]ddbtypes.AttributeValue
+	tableName string
+	ready     bool
+	width     int
+	height    int
+}
+
+// NewDetailModel constructs the detail view for the given raw item.
+// width and height should be the current terminal dimensions so the viewport
+// can be initialised immediately without waiting for a WindowSizeMsg.
+func NewDetailModel(item map[string]ddbtypes.AttributeValue, tableName string, width, height int) DetailModel {
+	m := DetailModel{
+		item:      item,
+		tableName: tableName,
+		width:     width,
+		height:    height,
+	}
+	if width > 0 && height > 0 {
+		m.initViewport(width, height)
+	}
+	return m
+}
+
+// initViewport creates or recreates the viewport for the given dimensions.
+func (m *DetailModel) initViewport(width, height int) {
+	headerH := 3
+	footerH := 2
+	vp := viewport.New(width, height-headerH-footerH)
+	vp.Style = lipgloss.NewStyle().
+		BorderStyle(lipgloss.NormalBorder()).
+		BorderForeground(ui.ColorBorder)
+	vp.SetContent(m.renderJSON())
+	m.viewport = vp
+	m.ready = true
+}
+
+func (m DetailModel) Init() tea.Cmd { return nil }
+
+func (m DetailModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		m.initViewport(msg.Width, msg.Height)
+		return m, nil
+
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "y":
+			// Copy JSON to clipboard via OSC 52 escape sequence — no exec.Command needed.
+			// This works in most modern terminals and avoids shelling out.
+			jsonStr := m.renderJSON()
+			return m, copyToClipboard(jsonStr)
+		}
+	}
+
+	vp, cmd := m.viewport.Update(msg)
+	m.viewport = vp
+	return m, cmd
+}
+
+func (m DetailModel) View() string {
+	if !m.ready {
+		return "\n  Initialising…"
+	}
+
+	title := ui.StyleTitle.Render(m.tableName) +
+		ui.StyleMuted.Render("  — item detail")
+
+	scrollPct := fmt.Sprintf("  %3.f%%", m.viewport.ScrollPercent()*100)
+	hints := ui.StyleMuted.Render("↑/↓ scroll  y copy JSON  esc back") +
+		ui.StyleMuted.Render(scrollPct)
+
+	return title + "\n" + m.viewport.View() + "\n" + hints
+}
+
+// renderJSON returns a pretty-printed JSON string of the item.
+func (m *DetailModel) renderJSON() string {
+	// Convert DynamoDB AttributeValues to a generic map for JSON marshalling.
+	generic := make(map[string]interface{}, len(m.item))
+	for k, v := range m.item {
+		generic[k] = attrValueToGeneric(v)
+	}
+
+	b, err := json.MarshalIndent(generic, "", "  ")
+	if err != nil {
+		return fmt.Sprintf("error rendering JSON: %v", err)
+	}
+	return string(b)
+}
+
+// copyToClipboard writes content to the terminal clipboard via OSC 52.
+// OSC 52 is supported by most modern terminals (iTerm2, kitty, foot, WezTerm,
+// tmux with set-clipboard on, etc.).  We write directly to /dev/tty so that
+// the escape sequence reaches the terminal even while bubbletea holds stdout.
+func copyToClipboard(content string) tea.Cmd {
+	return func() tea.Msg {
+		encoded := base64.StdEncoding.EncodeToString([]byte(content))
+		seq := "\x1b]52;c;" + encoded + "\x07"
+
+		tty, err := os.OpenFile("/dev/tty", os.O_WRONLY, 0) //nolint:gosec
+		if err != nil {
+			return ui.SetErrorMsg{Err: "clipboard: could not open /dev/tty: " + err.Error()}
+		}
+		defer tty.Close()
+
+		if _, err := tty.WriteString(seq); err != nil {
+			return ui.SetErrorMsg{Err: "clipboard: write failed: " + err.Error()}
+		}
+
+		return ui.SetStatusMsg{Msg: "copied to clipboard"}
+	}
+}
