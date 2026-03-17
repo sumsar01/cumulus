@@ -1,5 +1,159 @@
 # Agent Instructions
 
+## Project Overview
+
+**cumulus** — a terminal UI for AWS, built with [Bubble Tea](https://github.com/charmbracelet/bubbletea).
+Module: `github.com/sumsar01/cumulus` | Binary: `cumulus` | Repo: `aws-tui`
+
+Currently supports DynamoDB (browse, scan/query, edit items). Extensible via a service plugin interface.
+
+---
+
+## Build, Run, and Test Commands
+
+```bash
+# Build
+go build -o cumulus .
+
+# Run without building
+go run .
+
+# Verify all packages compile
+go build ./...
+
+# Static analysis
+go vet ./...
+
+# Run all tests
+go test ./...
+
+# Run a single test (by name, in a specific package)
+go test -run TestFunctionName ./internal/path/to/pkg/
+
+# Run tests with verbose output
+go test -v ./...
+```
+
+There is no Makefile, justfile, or CI pipeline. No linter config (`.golangci.yml`) exists yet.
+
+---
+
+## Code Style
+
+### Imports
+
+Use `goimports` grouping: stdlib → external → internal, with blank lines between groups.
+
+```go
+import (
+    "context"
+    "fmt"
+
+    "github.com/aws/aws-sdk-go-v2/aws"
+    tea "github.com/charmbracelet/bubbletea"
+
+    awspkg "github.com/sumsar01/cumulus/internal/aws"
+    "github.com/sumsar01/cumulus/internal/ui"
+)
+```
+
+Standard aliases: `tea` for `charmbracelet/bubbletea`, `awspkg` for `internal/aws`,
+`ddbtypes` for `aws-sdk-go-v2/service/dynamodb/types`.
+
+### Formatting
+
+Standard `gofmt`. No custom formatting rules.
+
+### Naming
+
+| Thing | Convention | Example |
+|---|---|---|
+| Types | PascalCase | `TablesModel`, `ItemsModel` |
+| Tea message types | suffix `Msg` | `tablesLoadedMsg`, `ProfileChangedMsg`, `ErrMsg` |
+| Constructors | prefix `New` | `NewTablesModel`, `NewSpinner` |
+| Tea command funcs | suffix `Cmd` | `fetchTablesCmd`, `putItemCmd` |
+| Internal bus messages | unexported | `tablesLoadedMsg`, `editorDoneMsg` |
+
+### Error Handling
+
+- Always wrap with context: `fmt.Errorf("fetchTables: %w", err)`
+- Propagate async errors to the Tea message bus: `awspkg.ErrMsg{Err: err}`
+- Use `errors.Is(err, os.ErrNotExist)` for sentinel checks
+- Annotate security-reviewed calls: `// #nosec G304` (file reads), `// #nosec G204` (exec)
+- No `panic()` in production code
+
+### Comments
+
+- Godoc comment on every exported symbol
+- Section dividers: `// ── Section name ────────────────────────────────────────`
+- Inline rationale for security decisions (why IMDS is disabled, why editor is allowlisted, etc.)
+
+### Structs and Receivers
+
+- Models are value types; pass by value
+- Pointer receivers only for mutation helpers (e.g. `reset()`, `rebuildTable()`)
+- `Init()` and `View()` use value receivers; `Update()` returns `(tea.Model, tea.Cmd)`
+
+---
+
+## Architecture
+
+### Bubble Tea Elm Pattern
+
+All UI models implement `tea.Model` (`Init`, `Update`, `View`). The root `App` model maintains
+a view stack (`App.stack []tea.Model`). Navigation uses `PushMsg`/`PopMsg`.
+
+```
+App (root)
+ └─ stack: [Navigator | TablesModel | ItemsModel | DetailModel | ...]
+```
+
+### Async AWS I/O
+
+All AWS calls are async via `tea.Cmd` closures that return typed `tea.Msg` values.
+Never block in `Update()`.
+
+```go
+func fetchTablesCmd(ctx context.Context, client *dynamodb.Client) tea.Cmd {
+    return func() tea.Msg {
+        // ... AWS call ...
+        return tablesLoadedMsg{tables: out.TableNames}
+    }
+}
+```
+
+### Service Plugin Pattern
+
+Add a new AWS service by implementing the `Service` interface in `internal/services/`:
+
+```go
+type Service interface {
+    Name() string
+    ShortName() string
+    Description() string
+    Icon() string
+    Init(cfg aws.Config) (tea.Model, tea.Cmd)
+}
+```
+
+Register in `main.go` with `services.Register(...)`. No other files need changing.
+
+### Profile Switching
+
+Profile changes broadcast `ProfileChangedMsg` to the entire stack so all models can reinitialise
+their AWS clients.
+
+---
+
+## Security Conventions
+
+- **Editor allowlist**: only `nvim`, `vim`, `vi`, `nano`, `emacs`, `hx`, `micro` are accepted in config
+- **No shell interpolation**: editor commands are passed as `exec.Command(binary, args...)`, never through a shell
+- **IMDS disabled**: AWS SDK config sets `EC2IMDSClientEnableState: imds.ClientDisabled`
+- **`// #nosec` annotations**: all `gosec` suppressions are documented with a comment explaining why it is safe
+
+---
+
 This project uses **bd** (beads) for issue tracking. Run `bd onboard` to get started.
 
 ## Quick Reference

@@ -45,9 +45,7 @@ func (m *DetailModel) initViewport(width, height int) {
 	headerH := 3
 	footerH := 2
 	vp := viewport.New(width, height-headerH-footerH)
-	vp.Style = lipgloss.NewStyle().
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(ui.ColorBorder)
+	vp.Style = ui.StyleViewportBorder
 	vp.SetContent(m.renderJSON())
 	m.viewport = vp
 	m.ready = true
@@ -81,20 +79,28 @@ func (m DetailModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m DetailModel) View() string {
 	if !m.ready {
-		return "\n  Initialising…"
+		content := ui.StyleMuted.Background(ui.ColorBg).Render("  Initialising…")
+		return lipgloss.Place(m.width, m.height,
+			lipgloss.Center, lipgloss.Center, content,
+			lipgloss.WithWhitespaceBackground(ui.ColorBg))
 	}
 
-	title := ui.StyleTitle.Render(m.tableName) +
-		ui.StyleMuted.Render("  — item detail")
+	title := lipgloss.NewStyle().Background(ui.ColorBg).Width(m.width).Render(
+		ui.StyleTitle.Background(ui.ColorBg).Render(m.tableName) +
+			ui.StyleMuted.Background(ui.ColorBg).Render("  — item detail"),
+	)
 
 	scrollPct := fmt.Sprintf("  %3.f%%", m.viewport.ScrollPercent()*100)
-	hints := ui.StyleMuted.Render("↑/↓ scroll  y copy JSON  esc back") +
-		ui.StyleMuted.Render(scrollPct)
+	hints := lipgloss.NewStyle().Background(ui.ColorBg).Width(m.width).Render(
+		ui.StyleMuted.Background(ui.ColorBg).Render("↑/↓ scroll  y copy JSON  esc back") +
+			ui.StyleMuted.Background(ui.ColorBg).Render(scrollPct),
+	)
 
 	return title + "\n" + m.viewport.View() + "\n" + hints
 }
 
-// renderJSON returns a pretty-printed JSON string of the item.
+// renderJSON returns a pretty-printed JSON string of the item, styled with
+// the app background colour so the viewport interior matches the theme.
 func (m *DetailModel) renderJSON() string {
 	// Convert DynamoDB AttributeValues to a generic map for JSON marshalling.
 	generic := make(map[string]interface{}, len(m.item))
@@ -104,9 +110,11 @@ func (m *DetailModel) renderJSON() string {
 
 	b, err := json.MarshalIndent(generic, "", "  ")
 	if err != nil {
-		return fmt.Sprintf("error rendering JSON: %v", err)
+		return lipgloss.NewStyle().Background(ui.ColorBg).Foreground(ui.ColorDanger).
+			Render(fmt.Sprintf("error rendering JSON: %v", err))
 	}
-	return string(b)
+	return lipgloss.NewStyle().Background(ui.ColorBg).Foreground(ui.ColorText).
+		Render(string(b))
 }
 
 // copyToClipboard writes content to the terminal clipboard via OSC 52.

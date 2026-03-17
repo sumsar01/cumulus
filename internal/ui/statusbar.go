@@ -19,44 +19,43 @@ type StatusBar struct {
 // View renders the status bar. Errors appear on a dedicated second line so
 // the full message is always visible.
 func (s StatusBar) View() string {
+	surfaceStyle := lipgloss.NewStyle().Background(ColorSurface)
 	accentSep := StyleStatusBarSep.Background(ColorSurface).Render("  ›  ")
-	dimSep := lipgloss.NewStyle().Foreground(ColorMuted).Background(ColorSurface).Render("  ›  ")
+	dimSep := StyleStatusDimSep.Render("  ›  ")
 
 	// Left side: profile pill › region › crumbs
 	// The active (last) crumb is primary blue + bold; earlier crumbs are subtext.
-	left := " " + StylePill.Render(s.Profile)
+	left := surfaceStyle.Render(" ") + StylePill.Render(s.Profile)
 
 	if s.Region != "" {
-		left += accentSep + StyleStatusBar.Foreground(ColorSubtext).Render(s.Region)
+		left += accentSep + StyleStatusBar.Foreground(ColorSubtext).Background(ColorSurface).Render(s.Region)
 	}
 
 	for i, crumb := range s.Breadcrumb {
 		if i == len(s.Breadcrumb)-1 {
 			// Active crumb — primary blue, bold
-			left += dimSep + lipgloss.NewStyle().
-				Foreground(ColorPrimary).Bold(true).
-				Background(ColorSurface).Render(crumb)
+			left += dimSep + StyleStatusActiveCrumb.Render(crumb)
 		} else {
-			left += dimSep + StyleStatusBar.Foreground(ColorSubtext).Render(crumb)
+			left += dimSep + StyleStatusBar.Foreground(ColorSubtext).Background(ColorSurface).Render(crumb)
 		}
 	}
 
 	// Right side: hints (hidden when there is an error/status on the line below)
 	right := ""
 	if s.Err == "" && s.Status == "" {
-		right = lipgloss.NewStyle().Foreground(ColorMuted).Background(ColorSurface).Render("p  profile   ?  help   q  quit ")
+		right = StyleStatusHints.Render("p  profile   t  theme   ?  help   q  quit ")
 	}
 
-	gap := s.Width - lipgloss.Width(left) - lipgloss.Width(right) - 0
+	gap := s.Width - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 1 {
 		gap = 1
 	}
 
-	bar := left + strings.Repeat(" ", gap) + right
-	main := StyleStatusBar.
-		Background(ColorSurface).
-		Width(s.Width).
-		Render(bar)
+	// Style the gap explicitly so the background is set and no terminal-default
+	// black chars appear between the pre-rendered ANSI segments.
+	gapStr := surfaceStyle.Render(strings.Repeat(" ", gap))
+
+	main := lipgloss.JoinHorizontal(lipgloss.Top, left, gapStr, right)
 
 	if s.Err != "" {
 		errLine := StyleDanger.

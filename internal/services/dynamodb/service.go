@@ -20,7 +20,7 @@ type Svc struct {
 func (Svc) Name() string        { return "DynamoDB" }
 func (Svc) ShortName() string   { return "dynamodb" }
 func (Svc) Description() string { return "Browse, query and edit DynamoDB tables and items" }
-func (Svc) Icon() string        { return "⬡" }
+func (Svc) Icon() string        { return "○" }
 
 // Init returns the tables-list model as the entry point for the DynamoDB service.
 func (s Svc) Init(cfg aws.Config) (tea.Model, tea.Cmd) {

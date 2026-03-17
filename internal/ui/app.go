@@ -48,6 +48,7 @@ type App struct {
 
 	// overlays rendered on top of everything
 	profilePicker *ProfilePicker
+	themePicker   *ThemePicker
 	helpOverlay   *HelpOverlay
 }
 
@@ -97,12 +98,31 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.status.Region = msg.Region
 		a.status.Err = ""
 		a.status.Status = ""
+		// Persist the chosen profile so it is restored on next launch.
+		appCfg := a.appCfg
+		appCfg.LastProfile = msg.Profile
+		a.appCfg = appCfg
+		cmds = append(cmds, func() tea.Msg {
+			_ = config.Save(appCfg) // best-effort; ignore errors
+			return nil
+		})
 		// Broadcast to the entire stack.
 		for i, m := range a.stack {
 			updated, cmd := m.Update(msg)
 			a.stack[i] = updated
 			cmds = append(cmds, cmd)
 		}
+		return a, tea.Batch(cmds...)
+
+	case ThemeChangedMsg:
+		// ApplyTheme was already called live by the picker; here we persist.
+		appCfg := a.appCfg
+		appCfg.Theme = msg.Name
+		a.appCfg = appCfg
+		cmds = append(cmds, func() tea.Msg {
+			_ = config.Save(appCfg) // best-effort; ignore errors
+			return nil
+		})
 		return a, tea.Batch(cmds...)
 
 	case awspkg.ErrMsg:
@@ -125,7 +145,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case PushMsg:
 		a.stack = append(a.stack, msg.Model)
-		return a, msg.Model.Init()
+		// Immediately size the new model to the current terminal dimensions.
+		inner := tea.WindowSizeMsg{Width: a.width, Height: a.height - 2}
+		updated, sizeCmd := a.top().Update(inner)
+		a.setTop(updated)
+		return a, tea.Batch(updated.Init(), sizeCmd)
 
 	case PopMsg:
 		if len(a.stack) > 1 {
@@ -166,6 +190,8 @@ func (a App) View() string {
 		body = a.helpOverlay.View(a.width, a.height-1)
 	} else if a.profilePicker != nil {
 		body = a.profilePicker.View(a.width, a.height-1)
+	} else if a.themePicker != nil {
+		body = a.themePicker.View(a.width, a.height-1)
 	}
 
 	return body + "\n" + a.status.View()
@@ -196,6 +222,15 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		a.profilePicker = picker
 		return a, cmd
 	}
+	if a.themePicker != nil {
+		picker, cmd, done := a.themePicker.Update(msg)
+		if done {
+			a.themePicker = nil
+			return a, cmd // cmd is either ThemeChangedMsg or nil (cancel)
+		}
+		a.themePicker = picker
+		return a, cmd
+	}
 
 	// If the active view has a text input open, bypass all global
 	// shortcuts — only ctrl+c remains a hard quit.
@@ -222,6 +257,10 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		pp, cmd := NewProfilePicker(a.status.Profile)
 		a.profilePicker = &pp
 		return a, cmd
+	case "t":
+		tp := NewThemePicker()
+		a.themePicker = &tp
+		return a, nil
 	case "esc":
 		if len(a.stack) > 1 {
 			a.stack = a.stack[:len(a.stack)-1]

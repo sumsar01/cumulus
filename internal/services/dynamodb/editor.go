@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/sumsar01/cumulus/internal/config"
@@ -22,79 +24,125 @@ type editorDoneMsg struct {
 	Err  error
 }
 
-// editorExec writes initialJSON to a temp file, execs the editor, reads the
-// result, validates it as JSON, and returns an editorDoneMsg. It is designed
-// to be used with tea.ExecProcess via a thin exec.Cmd wrapper.
-//
-// This function is the single point where the editor binary is executed.
-func editorExec(cfg config.Config, initialJSON []byte) ([]byte, error) {
-	// 1. Create a randomised temp directory (not a predictable path).
-	dir, err := os.MkdirTemp("", "cumulus-*")
-	if err != nil {
-		return nil, fmt.Errorf("creating temp dir: %w", err)
-	}
-	defer os.RemoveAll(dir) // always clean up, even on error // #nosec G defer
-
-	tmpFile := filepath.Join(dir, "item.json")
-
-	// 2. Write with mode 0600 — owner read/write only.
-	if err := os.WriteFile(tmpFile, initialJSON, 0600); err != nil { // #nosec G306
-		return nil, fmt.Errorf("writing temp file: %w", err)
-	}
-
-	// 3. Exec editor directly — no shell, no shell expansion.
-	//    cfg.Editor has already been validated against the allowlist by the
-	//    config package at startup. We do a final sanity check here as defence
-	//    in depth.
-	editorBin, err := validateEditorBin(cfg.Editor)
-	if err != nil {
-		return nil, err
-	}
-
-	cmd := exec.Command(editorBin, tmpFile) // #nosec G204 — binary validated above
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Run(); err != nil {
-		// Give a clear hint when the binary simply isn't in PATH.
-		if errors.Is(err, exec.ErrNotFound) {
-			// Build the allowed list dynamically from config.AllowedEditors.
-			names := make([]string, 0, len(config.AllowedEditors))
-			for k := range config.AllowedEditors {
-				names = append(names, k)
-			}
-			sort.Strings(names)
-			return nil, fmt.Errorf(
-				"editor %q not found in PATH — install it or set a different editor in ~/.config/cumulus/config.toml\n(allowed: %s)",
-				editorBin, strings.Join(names, ", "),
-			)
-		}
-		return nil, fmt.Errorf("editor exited: %w", err)
-	}
-
-	// 4. Read the result back.
-	data, err := os.ReadFile(tmpFile) // #nosec G304 — path is our own temp file
-	if err != nil {
-		return nil, fmt.Errorf("reading temp file after edit: %w", err)
-	}
-
-	// 5. Validate JSON before returning — never send unparseable bytes to the API.
-	var v interface{}
-	if err := json.Unmarshal(data, &v); err != nil {
-		return nil, fmt.Errorf("result is not valid JSON: %w", err)
-	}
-
-	return data, nil
+// drainExecCommand wraps an *exec.Cmd and implements tea.ExecCommand.
+// After Run() returns it drains any pending bytes from stdin (with a short
+// deadline) so that terminal capability query responses emitted by the editor
+// (e.g. vim's DA2 / t_RV queries) do not leak into Bubble Tea's input loop
+// or the parent shell once the TUI exits.
+type drainExecCommand struct {
+	cmd *exec.Cmd
+	// stdin/stdout/stderr are set by Bubble Tea via the ExecCommand interface.
+	stdin  io.Reader
+	stdout io.Writer
+	stderr io.Writer
 }
 
-// startEditorCmd is the real entry point used by the items model. It runs
-// editorExec in a goroutine and emits editorDoneMsg when done.
-func startEditorCmd(cfg config.Config, initialJSON []byte) tea.Cmd {
-	return func() tea.Msg {
-		data, err := editorExec(cfg, initialJSON)
-		return editorDoneMsg{Data: data, Err: err}
+func (d *drainExecCommand) SetStdin(r io.Reader)  { d.stdin = r }
+func (d *drainExecCommand) SetStdout(w io.Writer) { d.stdout = w }
+func (d *drainExecCommand) SetStderr(w io.Writer) { d.stderr = w }
+
+func (d *drainExecCommand) Run() error {
+	if d.cmd.Stdin == nil {
+		d.cmd.Stdin = d.stdin
 	}
+	if d.cmd.Stdout == nil {
+		d.cmd.Stdout = d.stdout
+	}
+	if d.cmd.Stderr == nil {
+		d.cmd.Stderr = d.stderr
+	}
+
+	runErr := d.cmd.Run()
+
+	// Drain any terminal responses (e.g. vim's DA2 capability queries) that
+	// arrived on stdin while the editor owned the terminal. Without this,
+	// those bytes leak into Bubble Tea's input reader or the parent shell.
+	//
+	// We read from the underlying *os.File directly so we can set a deadline.
+	// The drain window is intentionally short — 50 ms is enough for any
+	// in-flight terminal response to arrive.
+	if f, ok := d.stdin.(*os.File); ok {
+		_ = f.SetReadDeadline(time.Now().Add(50 * time.Millisecond))
+		buf := make([]byte, 4096)
+		for {
+			_, err := f.Read(buf)
+			if err != nil {
+				break // deadline exceeded or EOF — done draining
+			}
+		}
+		_ = f.SetReadDeadline(time.Time{}) // clear deadline
+	}
+
+	return runErr
+}
+
+// startEditorCmd suspends the Bubble Tea TUI, hands the terminal to the
+// configured editor, then resumes and emits editorDoneMsg with the result.
+//
+// It uses tea.Exec with a custom drainExecCommand so that terminal capability
+// query responses fired by the editor (e.g. vim's DA2 / t_RV) are drained
+// from stdin before Bubble Tea's input loop resumes, preventing them from
+// appearing as garbage input in the TUI or the parent shell.
+func startEditorCmd(cfg config.Config, initialJSON []byte) tea.Cmd {
+	// 1. Validate the editor binary before touching the filesystem.
+	editorBin, err := validateEditorBin(cfg.Editor)
+	if err != nil {
+		return func() tea.Msg { return editorDoneMsg{Err: err} }
+	}
+
+	// 2. Create the temp dir and write the initial content synchronously.
+	//    Cleanup happens inside the Exec callback after reading the result.
+	dir, err := os.MkdirTemp("", "cumulus-*")
+	if err != nil {
+		return func() tea.Msg {
+			return editorDoneMsg{Err: fmt.Errorf("creating temp dir: %w", err)}
+		}
+	}
+
+	tmpFile := filepath.Join(dir, "item.json")
+	if err := os.WriteFile(tmpFile, initialJSON, 0600); err != nil { // #nosec G306
+		os.RemoveAll(dir)
+		return func() tea.Msg {
+			return editorDoneMsg{Err: fmt.Errorf("writing temp file: %w", err)}
+		}
+	}
+
+	// 3. Use tea.Exec with our draining wrapper instead of tea.ExecProcess so
+	//    we can flush stray terminal responses after the editor exits.
+	execCmd := &drainExecCommand{
+		cmd: exec.Command(editorBin, tmpFile), // #nosec G204 — binary validated above
+	}
+	return tea.Exec(execCmd, func(execErr error) tea.Msg {
+		defer os.RemoveAll(dir) // #nosec G defer — always clean up
+
+		if execErr != nil {
+			if errors.Is(execErr, exec.ErrNotFound) {
+				names := make([]string, 0, len(config.AllowedEditors))
+				for k := range config.AllowedEditors {
+					names = append(names, k)
+				}
+				sort.Strings(names)
+				return editorDoneMsg{Err: fmt.Errorf(
+					"editor %q not found in PATH — install it or set a different editor in ~/.config/cumulus/config.toml\n(allowed: %s)",
+					editorBin, strings.Join(names, ", "),
+				)}
+			}
+			return editorDoneMsg{Err: fmt.Errorf("editor exited: %w", execErr)}
+		}
+
+		// Read the file back and validate it is still valid JSON.
+		data, err := os.ReadFile(tmpFile) // #nosec G304 — path is our own temp file
+		if err != nil {
+			return editorDoneMsg{Err: fmt.Errorf("reading temp file after edit: %w", err)}
+		}
+
+		var v interface{}
+		if err := json.Unmarshal(data, &v); err != nil {
+			return editorDoneMsg{Err: fmt.Errorf("result is not valid JSON: %w", err)}
+		}
+
+		return editorDoneMsg{Data: data}
+	})
 }
 
 // validateEditorBin checks the binary name against the hard-coded allowlist as
