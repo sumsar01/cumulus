@@ -157,14 +157,161 @@ var ThemeSolarizedLight = Theme{
 	Subtext:     lipgloss.Color("#839496"), // base0
 }
 
+// ThemeCatppuccinLatte is the light variant of Catppuccin — soft creams, dusty pinks, lavender.
+var ThemeCatppuccinLatte = Theme{
+	Name:        "catppuccin-latte",
+	DisplayName: "Catppuccin Latte",
+	Description: "soft creams & lavender",
+	Primary:     lipgloss.Color("#8839ef"), // mauve
+	Secondary:   lipgloss.Color("#e64553"), // maroon
+	Accent:      lipgloss.Color("#04a5e5"), // sky
+	Muted:       lipgloss.Color("#acb0be"), // overlay0
+	Success:     lipgloss.Color("#40a02b"), // green
+	Warning:     lipgloss.Color("#df8e1d"), // yellow
+	Danger:      lipgloss.Color("#d20f39"), // red
+	Bg:          lipgloss.Color("#eff1f5"), // base
+	Surface:     lipgloss.Color("#e6e9ef"), // mantle
+	Border:      lipgloss.Color("#ccd0da"), // surface0
+	Highlight:   lipgloss.Color("#ccd0da"), // surface0
+	Text:        lipgloss.Color("#4c4f69"), // text
+	Subtext:     lipgloss.Color("#6c6f85"), // subtext0
+}
+
+// ThemeRosePine is a dark theme with dusty rose, sage green, and warm cream text.
+var ThemeRosePine = Theme{
+	Name:        "rose-pine",
+	DisplayName: "Rosé Pine",
+	Description: "dusty rose & sage dark",
+	Primary:     lipgloss.Color("#c4a7e7"), // iris
+	Secondary:   lipgloss.Color("#ebbcba"), // rose
+	Accent:      lipgloss.Color("#9ccfd8"), // foam
+	Muted:       lipgloss.Color("#6e6a86"), // muted
+	Success:     lipgloss.Color("#9ccfd8"), // foam
+	Warning:     lipgloss.Color("#f6c177"), // gold
+	Danger:      lipgloss.Color("#eb6f92"), // love
+	Bg:          lipgloss.Color("#191724"), // base
+	Surface:     lipgloss.Color("#26233a"), // surface
+	Border:      lipgloss.Color("#403d52"), // overlay
+	Highlight:   lipgloss.Color("#403d52"), // overlay
+	Text:        lipgloss.Color("#e0def4"), // text
+	Subtext:     lipgloss.Color("#908caa"), // subtle
+}
+
+// ThemeRosePineDawn is the light variant of Rosé Pine — warm off-white with rose and gold.
+var ThemeRosePineDawn = Theme{
+	Name:        "rose-pine-dawn",
+	DisplayName: "Rosé Pine Dawn",
+	Description: "warm off-white & rose",
+	Primary:     lipgloss.Color("#907aa9"), // iris
+	Secondary:   lipgloss.Color("#d7827e"), // rose
+	Accent:      lipgloss.Color("#56949f"), // foam
+	Muted:       lipgloss.Color("#9893a5"), // muted
+	Success:     lipgloss.Color("#56949f"), // foam
+	Warning:     lipgloss.Color("#ea9d34"), // gold
+	Danger:      lipgloss.Color("#b4637a"), // love
+	Bg:          lipgloss.Color("#faf4ed"), // base
+	Surface:     lipgloss.Color("#fffaf3"), // surface
+	Border:      lipgloss.Color("#dfdad9"), // overlay
+	Highlight:   lipgloss.Color("#f2e9e1"), // highlight med
+	Text:        lipgloss.Color("#575279"), // text
+	Subtext:     lipgloss.Color("#797593"), // subtle
+}
+
+// ThemeKanagawa is inspired by Japanese woodblock prints — deep indigo, golden amber, sakura pink.
+var ThemeKanagawa = Theme{
+	Name:        "kanagawa",
+	DisplayName: "Kanagawa",
+	Description: "deep indigo & sakura",
+	Primary:     lipgloss.Color("#7e9cd8"), // crystalBlue
+	Secondary:   lipgloss.Color("#957fb8"), // oniViolet
+	Accent:      lipgloss.Color("#7fb4ca"), // springBlue
+	Muted:       lipgloss.Color("#727169"), // fujiGray
+	Success:     lipgloss.Color("#98bb6c"), // springGreen
+	Warning:     lipgloss.Color("#dca561"), // carpYellow
+	Danger:      lipgloss.Color("#c34043"), // samuraiRed
+	Bg:          lipgloss.Color("#1f1f28"), // sumiInk0
+	Surface:     lipgloss.Color("#2a2a37"), // sumiInk3
+	Border:      lipgloss.Color("#54546d"), // sumiInk6
+	Highlight:   lipgloss.Color("#2d4f67"), // waveBlue1
+	Text:        lipgloss.Color("#dcd7ba"), // fujiWhite
+	Subtext:     lipgloss.Color("#c8c093"), // oldWhite
+}
+
+// ThemeEverforest is a calm earthy dark theme with greens and warm neutrals.
+var ThemeEverforest = Theme{
+	Name:        "everforest",
+	DisplayName: "Everforest",
+	Description: "earthy greens & warm",
+	Primary:     lipgloss.Color("#83c092"), // green
+	Secondary:   lipgloss.Color("#d699b6"), // purple
+	Accent:      lipgloss.Color("#7fbbb3"), // aqua
+	Muted:       lipgloss.Color("#7a8478"), // grey1
+	Success:     lipgloss.Color("#a7c080"), // green
+	Warning:     lipgloss.Color("#dbbc7f"), // yellow
+	Danger:      lipgloss.Color("#e67e80"), // red
+	Bg:          lipgloss.Color("#2d353b"), // bg0
+	Surface:     lipgloss.Color("#343f44"), // bg1
+	Border:      lipgloss.Color("#3d484d"), // bg3
+	Highlight:   lipgloss.Color("#3d484d"), // bg3
+	Text:        lipgloss.Color("#d3c6aa"), // fg
+	Subtext:     lipgloss.Color("#9da9a0"), // grey2
+}
+
+// ThemeSakura is a custom cherry-blossom light theme — pale pink background, deep rose accents.
+var ThemeSakura = Theme{
+	Name:        "sakura",
+	DisplayName: "Sakura",
+	Description: "pale pink cherry blossom",
+	Primary:     lipgloss.Color("#b5485d"), // deep rose
+	Secondary:   lipgloss.Color("#9b3a6e"), // plum
+	Accent:      lipgloss.Color("#c97aa0"), // mid rose
+	Muted:       lipgloss.Color("#c4a0b0"), // dusty pink
+	Success:     lipgloss.Color("#6aab6a"), // soft green
+	Warning:     lipgloss.Color("#c8922a"), // amber
+	Danger:      lipgloss.Color("#c0392b"), // red
+	Bg:          lipgloss.Color("#fdf0f5"), // blush white
+	Surface:     lipgloss.Color("#f8dde8"), // pale petal
+	Border:      lipgloss.Color("#e8b4c8"), // light rose border
+	Highlight:   lipgloss.Color("#f2cad8"), // petal highlight
+	Text:        lipgloss.Color("#4a2030"), // deep plum text
+	Subtext:     lipgloss.Color("#7a4055"), // mid plum text
+}
+
+// ThemeAyuLight is a crisp light theme with amber and orange accents on near-white.
+var ThemeAyuLight = Theme{
+	Name:        "ayu-light",
+	DisplayName: "Ayu Light",
+	Description: "crisp white & amber",
+	Primary:     lipgloss.Color("#399ee6"), // blue
+	Secondary:   lipgloss.Color("#a37acc"), // purple
+	Accent:      lipgloss.Color("#55b4d4"), // cyan
+	Muted:       lipgloss.Color("#abb0b6"), // guide
+	Success:     lipgloss.Color("#86b300"), // green
+	Warning:     lipgloss.Color("#f2ae49"), // orange
+	Danger:      lipgloss.Color("#f07171"), // red
+	Bg:          lipgloss.Color("#fafafa"), // bg
+	Surface:     lipgloss.Color("#f3f4f5"), // panel bg
+	Border:      lipgloss.Color("#d9dbe0"), // border
+	Highlight:   lipgloss.Color("#e7e8ea"), // selection
+	Text:        lipgloss.Color("#5c6166"), // fg
+	Subtext:     lipgloss.Color("#8a9199"), // comment
+}
+
 // AllThemes is the ordered list of built-in themes shown in the theme picker.
 var AllThemes = []Theme{
 	ThemeTokyoNight,
 	ThemeCatppuccinMocha,
+	ThemeCatppuccinLatte,
 	ThemeDracula,
 	ThemeGruvbox,
 	ThemeNord,
 	ThemeSolarizedLight,
+	ThemeRosePine,
+	ThemeRosePineDawn,
+	ThemeKanagawa,
+	ThemeEverforest,
+	ThemeSakura,
+	ThemeAyuLight,
 }
 
 // ActiveTheme is the currently applied theme. Initialised to Tokyo Night;
