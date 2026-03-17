@@ -30,7 +30,6 @@ type Prompt struct {
 	kind  PromptKind
 	field huh.Field
 	value string // bound string for Input fields
-	bval  bool   // bound bool for Confirm fields
 }
 
 // NewFilterPrompt builds a filter-expression prompt.
@@ -68,7 +67,6 @@ func NewConfirmPrompt(message string) Prompt {
 		Description("Select Yes to confirm, No or Esc to cancel").
 		Affirmative("Yes").
 		Negative("No").
-		Value(&p.bval).
 		WithTheme(ui.CumulusHuhTheme())
 	// Focus the field immediately.
 	_ = p.field.Focus()
@@ -118,7 +116,7 @@ func (p Prompt) doneCmd() tea.Cmd {
 	return func() tea.Msg {
 		switch p.kind {
 		case PromptConfirm:
-			if p.bval {
+			if p.field.GetValue().(bool) {
 				return promptDoneMsg{Value: "yes"}
 			}
 			return promptDoneMsg{Cancelled: true}
