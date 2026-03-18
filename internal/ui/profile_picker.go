@@ -77,32 +77,34 @@ func (p *ProfilePicker) HandleMsg(msg tea.Msg) (*ProfilePicker, tea.Cmd) {
 
 // View renders the profile picker as a centred overlay box.
 func (p *ProfilePicker) View(width, height int) string {
-	title := StyleTitle.Render("switch profile")
-	hint := StyleDimmed.Render("↑/↓  navigate   enter  select   esc  cancel")
-	sep := StyleDimmed.Render(strings.Repeat("─", 40))
+	bg := ColorSurface
+
+	title := StyleTitle.Background(bg).Render("switch profile")
+	hint := StyleDimmed.Background(bg).Render("↑/↓  navigate   enter  select   esc  cancel")
+	sep := StyleDimmed.Background(bg).Render(strings.Repeat("─", 40))
 
 	var body string
 	if p.loading {
-		body = StyleMuted.Render("  loading profiles…")
+		body = StyleMuted.Background(bg).Render("  loading profiles…")
 	} else if len(p.profiles) == 0 {
-		body = StyleDimmed.Render("  no profiles found")
+		body = StyleDimmed.Background(bg).Render("  no profiles found")
 	} else {
 		var rows strings.Builder
 		for i, pr := range p.profiles {
 			active := ""
 			if pr == p.current {
-				active = StyleDimmed.Render(" ·")
+				active = StyleDimmed.Background(bg).Render(" ·")
 			}
 			if i == p.cursor {
 				rows.WriteString(
-					lipgloss.NewStyle().Foreground(ColorPrimary).Bold(true).Render("  › ") +
-						lipgloss.NewStyle().Foreground(ColorText).Bold(true).Render(pr) +
+					StyleProfileCursorPrefix.Background(bg).Render("  › ") +
+						StyleProfileSelectedName.Background(bg).Render(pr) +
 						active + "\n",
 				)
 			} else {
 				rows.WriteString(
-					StyleDimmed.Render("    ") +
-						StyleMuted.Render(pr) +
+					StyleDimmed.Background(bg).Render("    ") +
+						StyleMuted.Background(bg).Render(pr) +
 						active + "\n",
 				)
 			}
@@ -115,18 +117,14 @@ func (p *ProfilePicker) View(width, height int) string {
 		count = ""
 	}
 
-	content := title + "  " + StyleDimmed.Render(count) + "\n" +
+	content := title + "  " + StyleDimmed.Background(bg).Render(count) + "\n" +
 		sep + "\n" +
 		body + "\n" +
 		hint
 
-	box := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(ColorBorder).
-		Background(ColorSurface).
-		Padding(1, 2).
-		Width(46).
-		Render(content)
+	inner := StyleModalInner.Background(bg).Width(46).Render(content)
+
+	box := StyleModalBox.Background(bg).Padding(1, 2).Render(inner)
 
 	return lipgloss.Place(width, height,
 		lipgloss.Center, lipgloss.Center,

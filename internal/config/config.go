@@ -32,12 +32,23 @@ type Config struct {
 	// editor to open when adding or editing DynamoDB items. It must be one of
 	// the values in allowedEditors.
 	Editor string `toml:"editor"`
+
+	// LastProfile is the name of the most recently used AWS profile. cumulus
+	// writes this automatically when the user switches profiles so that the
+	// same profile is restored on the next launch.
+	LastProfile string `toml:"last_profile,omitempty"`
+
+	// Theme is the name of the colour theme to use. Must match one of the
+	// built-in theme Name values (e.g. "tokyo-night", "catppuccin-mocha").
+	// Defaults to "tokyo-night" when unset.
+	Theme string `toml:"theme,omitempty"`
 }
 
 // Default returns a Config populated with safe defaults.
 func Default() Config {
 	return Config{
 		Editor: "nvim",
+		Theme:  "tokyo-night",
 	}
 }
 
@@ -77,7 +88,24 @@ func Load() (Config, error) {
 	return cfg, nil
 }
 
-// validate checks that all fields are within acceptable bounds.
+// Save writes the config to disk at the standard location, creating the
+// directory if needed. Fields with zero values and omitempty tags are omitted.
+func Save(cfg Config) error {
+	path, err := configPath()
+	if err != nil {
+		return fmt.Errorf("resolving config path: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("creating config directory: %w", err)
+	}
+	f, err := os.Create(path) // #nosec G304 – path derived from XDG_CONFIG_HOME or $HOME
+	if err != nil {
+		return fmt.Errorf("writing config file %s: %w", path, err)
+	}
+	defer f.Close()
+	return toml.NewEncoder(f).Encode(cfg)
+}
+
 func (c *Config) validate() error {
 	if _, ok := AllowedEditors[c.Editor]; !ok {
 		allowed := make([]string, 0, len(AllowedEditors))

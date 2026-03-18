@@ -183,41 +183,44 @@ func isCredentialError(err error) bool {
 func (m TablesModel) View() string {
 	if m.loading {
 		content := fmt.Sprintf("%s  Loading tables…", m.spinner.View())
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content,
+			lipgloss.WithWhitespaceBackground(ui.ColorBg))
 	}
 	if m.err != nil {
 		if isCredentialError(m.err) {
-			content := ui.StyleDanger.Render("No AWS credentials found.") +
-				ui.StyleMuted.Render("\n\nMake sure a profile is configured in ~/.aws/config,\nor set AWS_PROFILE / AWS_ACCESS_KEY_ID in your environment.\n\nRun \"aws configure\" to set up credentials.") +
-				ui.StyleDimmed.Render("\n\nr  retry   p  switch profile")
-			return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+			content := ui.StyleDanger.Background(ui.ColorBg).Render("No AWS credentials found.") +
+				ui.StyleMuted.Background(ui.ColorBg).Render("\n\nMake sure a profile is configured in ~/.aws/config,\nor set AWS_PROFILE / AWS_ACCESS_KEY_ID in your environment.\n\nRun \"aws configure\" to set up credentials.") +
+				ui.StyleDimmed.Background(ui.ColorBg).Render("\n\nr  retry   p  switch profile")
+			return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content,
+				lipgloss.WithWhitespaceBackground(ui.ColorBg))
 		}
-		content := ui.StyleDanger.Render(m.err.Error()) +
-			ui.StyleDimmed.Render("\n\nr  retry")
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+		content := ui.StyleDanger.Background(ui.ColorBg).Render(m.err.Error()) +
+			ui.StyleDimmed.Background(ui.ColorBg).Render("\n\nr  retry")
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content,
+			lipgloss.WithWhitespaceBackground(ui.ColorBg))
 	}
 
 	vis := m.visible()
 	total := len(m.tables)
 
-	// Header line
-	title := ui.StyleTitle.Render("DynamoDB")
-	count := lipgloss.NewStyle().Foreground(ui.ColorMuted).Render(fmt.Sprintf("  %d / %d tables", len(vis), total))
+	// Header line — full terminal width.
+	title := ui.StyleTitle.Background(ui.ColorBg).Render("DynamoDB")
+	count := ui.StyleCount.Render(fmt.Sprintf("  %d / %d tables", len(vis), total))
 	filterHint := ""
 	if m.filtering {
-		filterHint = "  " + lipgloss.NewStyle().Foreground(ui.ColorAccent).Bold(true).Render("/") +
-			lipgloss.NewStyle().Foreground(ui.ColorText).Render(" "+m.filter) +
-			lipgloss.NewStyle().Foreground(ui.ColorMuted).Render("█")
+		filterHint = "  " + ui.StyleKey.Background(ui.ColorBg).Render("/") +
+			ui.StyleFilterActive.Render(" "+m.filter) +
+			ui.StyleCount.Render("█")
 	} else if m.filter != "" {
-		filterHint = "  " + lipgloss.NewStyle().Foreground(ui.ColorAccent).Bold(true).Render("/") +
-			lipgloss.NewStyle().Foreground(ui.ColorText).Render(" "+m.filter)
+		filterHint = "  " + ui.StyleKey.Background(ui.ColorBg).Render("/") +
+			ui.StyleFilterActive.Render(" "+m.filter)
 	}
-	header := lipgloss.NewStyle().PaddingLeft(2).Render(title + count + filterHint)
+	header := ui.StyleItemsHeader.Width(m.width).Render(title + count + filterHint)
 
-	// Separator
+	// Separator — full terminal width.
 	sep := ui.HorizontalSep(m.width)
 
-	// Table rows
+	// Table rows — each row at full terminal width.
 	maxRows := m.height - 4
 	if maxRows < 1 {
 		maxRows = 1
@@ -237,29 +240,31 @@ func (m TablesModel) View() string {
 	for i := start; i < end; i++ {
 		t := vis[i]
 		if i == m.cursor {
-			row := lipgloss.NewStyle().Background(ui.ColorHighlight).Width(m.width).Render(
-				"  " +
-					lipgloss.NewStyle().Foreground(ui.ColorAccent).Bold(true).Background(ui.ColorHighlight).Render("›") +
-					"  " +
-					lipgloss.NewStyle().Foreground(ui.ColorText).Bold(true).Background(ui.ColorHighlight).Render(t),
+			hlSp := lipgloss.NewStyle().Background(ui.ColorHighlight).Render("  ")
+			row := ui.StyleListRowSelected.Width(m.width).Render(
+				hlSp +
+					ui.StyleListRowSelectedCursor.Render("›") +
+					hlSp +
+					ui.StyleListRowSelectedName.Render(t),
 			)
 			rows.WriteString(row + "\n")
 		} else {
-			row := lipgloss.NewStyle().Width(m.width).Render(
-				"     " + lipgloss.NewStyle().Foreground(ui.ColorSubtext).Render(t),
+			row := ui.StyleListRowNormal.Width(m.width).Render(
+				"     " + ui.StyleListRowNormalName.Render(t),
 			)
 			rows.WriteString(row + "\n")
 		}
 	}
 
 	if len(vis) == 0 && !m.filtering {
-		content := lipgloss.NewStyle().Foreground(ui.ColorMuted).Render("no tables found")
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+		content := ui.StyleEmptyState.Render("no tables found")
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content,
+			lipgloss.WithWhitespaceBackground(ui.ColorBg))
 	} else if len(vis) == 0 {
-		rows.WriteString(lipgloss.NewStyle().Foreground(ui.ColorMuted).PaddingLeft(5).Render("no tables found\n"))
+		rows.WriteString(ui.StyleEmptyState.PaddingLeft(5).Render("no tables found\n"))
 	}
 
-	// Footer hints bar
+	// Footer hints bar — full terminal width.
 	var pairs [][2]string
 	if m.filtering {
 		pairs = [][2]string{{"esc", "cancel filter"}, {"enter", "confirm"}}
@@ -276,7 +281,7 @@ func (m TablesModel) View() string {
 	}
 	rowLines := strings.Count(rows.String(), "\n")
 	for i := rowLines; i < rowAreaHeight; i++ {
-		rows.WriteString("\n")
+		rows.WriteString(ui.StyleListRowNormal.Width(m.width).Render("") + "\n")
 	}
 
 	return header + "\n" + sep + "\n" + rows.String() + hints

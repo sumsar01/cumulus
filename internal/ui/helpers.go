@@ -4,25 +4,23 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/lipgloss"
 )
 
 // NewSpinner returns a spinner pre-configured with the cumulus theme.
 func NewSpinner() spinner.Model {
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
-	sp.Style = lipgloss.NewStyle().Foreground(ColorPrimary)
+	sp.Style = StyleSpinner
 	return sp
 }
 
 // HorizontalSep returns a full-width horizontal rule for use between sections.
-// width is the total terminal width; 4 columns are reserved for padding.
+// width is the total terminal width.
 func HorizontalSep(width int) string {
-	sepWidth := width - 4
-	if sepWidth < 1 {
-		sepWidth = 40
+	if width < 1 {
+		width = 40
 	}
-	return lipgloss.NewStyle().PaddingLeft(2).Foreground(ColorBorder).Render(strings.Repeat("─", sepWidth))
+	return StyleHorizSep.Width(width).Render(strings.Repeat("─", width))
 }
 
 // RenderHints builds the footer key-hint bar from a slice of [key, description]

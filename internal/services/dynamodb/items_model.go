@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/bubbles/table"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	awspkg "github.com/sumsar01/cumulus/internal/aws"
 	"github.com/sumsar01/cumulus/internal/config"
 	"github.com/sumsar01/cumulus/internal/ui"
@@ -64,7 +65,8 @@ type ItemsModel struct {
 
 	// display
 	table   table.Model
-	columns []string // current column set
+	columns []string    // current column set
+	rawRows []table.Row // rows without cursor prefix (source of truth)
 
 	spinner spinner.Model
 	loading bool
@@ -93,7 +95,7 @@ const (
 func NewItemsModel(cfg aws.Config, appCfg config.Config, tableName string) ItemsModel {
 	t := table.New(
 		table.WithFocused(true),
-		table.WithStyles(tableStyles()),
+		table.WithStyles(ui.DynamoTableStyles),
 	)
 
 	return ItemsModel{
@@ -103,24 +105,6 @@ func NewItemsModel(cfg aws.Config, appCfg config.Config, tableName string) Items
 		table:     t,
 		spinner:   ui.NewSpinner(),
 	}
-}
-
-func tableStyles() table.Styles {
-	s := table.DefaultStyles()
-	s.Header = s.Header.
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(ui.ColorBorder).
-		BorderBottom(true).
-		Foreground(ui.ColorMuted).
-		Background(ui.ColorSurface).
-		Bold(false)
-	s.Selected = s.Selected.
-		Foreground(ui.ColorText).
-		Background(ui.ColorHighlight).
-		Bold(true)
-	s.Cell = s.Cell.
-		Foreground(ui.ColorSubtext)
-	return s
 }
 
 func (m ItemsModel) Init() tea.Cmd {
@@ -212,6 +196,7 @@ func (m ItemsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	t, cmd := m.table.Update(msg)
 	m.table = t
+	m.injectCursor()
 	return m, cmd
 }
 
@@ -284,6 +269,7 @@ func (m ItemsModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	t, cmd := m.table.Update(msg)
 	m.table = t
+	m.injectCursor()
 	return m, cmd
 }
 
@@ -327,11 +313,19 @@ func (m *ItemsModel) handlePromptDone(value string) (tea.Model, tea.Cmd) {
 
 func (m ItemsModel) View() string {
 	if m.loading {
-		return fmt.Sprintf("  %s  Loading items…", m.spinner.View())
+		content := ui.StyleMuted.Background(ui.ColorBg).Render(
+			m.spinner.View() + "  Loading items…",
+		)
+		return lipgloss.Place(m.width, m.fullHeight,
+			lipgloss.Center, lipgloss.Center, content,
+			lipgloss.WithWhitespaceBackground(ui.ColorBg))
 	}
 	if m.err != nil {
-		return ui.StyleDanger.Render("  "+m.err.Error()) +
-			ui.StyleMuted.Render("\n\n  r  retry")
+		content := ui.StyleDanger.Background(ui.ColorBg).Render("  "+m.err.Error()) +
+			"\n" + ui.StyleMuted.Background(ui.ColorBg).Render("  r  retry")
+		return lipgloss.Place(m.width, m.fullHeight,
+			lipgloss.Center, lipgloss.Center, content,
+			lipgloss.WithWhitespaceBackground(ui.ColorBg))
 	}
 
 	if m.activePrompt != nil {
@@ -346,40 +340,81 @@ func (m ItemsModel) View() string {
 		{"/", "filter"}, {"Q", "query"}, {"r", "refresh"}, {"←/→", "pages"},
 	})
 
-	return header + "\n" + sep + "\n" + m.table.View() + "\n" + hints
+	// Re-style every line emitted by the table widget (including the blank
+	// viewport-padding lines) to force the theme background colour.  Without
+	// this, bubbles/table's internal viewport fills unused rows with a bare
+	// lipgloss.NewStyle() — no background — which renders as terminal-default
+	// black on Tokyo Night.
+	//
+	// The selected row requires special handling to get a full-width highlight:
+	//
+	//   1. bubbles/table's Selected style has no Width, so it never pads to the
+	//      terminal edge.
+	//   2. injectCursor() stores a plain "› " prefix (no pre-rendered ANSI) in
+	//      column 0, so there are no embedded \x1b[0m resets inside the row text
+	//      that would cancel a wrapping background mid-line.
+	//   3. We strip any residual ANSI codes from the selected line, re-render it
+	//      with the full-width selectedStyle, then re-inject the coloured cursor
+	//      glyph so it retains its accent colour against the highlight background.
+	//
+	// bubbles/table output layout after strings.Split on "\n":
+	//   line 0  — header row
+	//   line 1  — header bottom border
+	//   line 2+ — data rows  (index 2 + cursor = selected row)
+	lineStyle := lipgloss.NewStyle().Background(ui.ColorBg).MaxWidth(m.width).Width(m.width)
+	selectedStyle := lipgloss.NewStyle().
+		Background(ui.ColorHighlight).
+		Foreground(ui.ColorText).
+		Bold(true).
+		MaxWidth(m.width).
+		Width(m.width)
+	selectedLine := 2 + m.table.Cursor()
+	tableLines := strings.Split(m.table.View(), "\n")
+	for i, line := range tableLines {
+		if i == selectedLine {
+			// Strip existing ANSI codes so no embedded resets fight the new bg.
+			clean := ansi.Strip(line)
+			rendered := selectedStyle.Render(clean)
+			// Re-apply accent colour to the cursor glyph that injectCursor placed
+			// as plain text at the start of column 0.
+			rendered = strings.Replace(rendered, "› ", ui.StyleCursor.Render("›")+" ", 1)
+			tableLines[i] = rendered
+		} else {
+			tableLines[i] = lineStyle.Render(line)
+		}
+	}
+
+	body := header + "\n" + sep + "\n" + strings.Join(tableLines, "\n") + "\n" + hints
+	return body
 }
 
 func (m ItemsModel) headerView() string {
-	title := ui.StyleTitle.Render(m.tableName)
+	title := ui.StyleTitle.Background(ui.ColorBg).Render(m.tableName)
 
 	var modeBadge string
 	if m.mode == modeQuery {
-		modeBadge = lipgloss.NewStyle().
-			Foreground(ui.ColorBg).Background(ui.ColorPrimary).
-			PaddingLeft(1).PaddingRight(1).Render("query")
-		q := lipgloss.NewStyle().Foreground(ui.ColorAccent).Render("pk=") +
-			lipgloss.NewStyle().Foreground(ui.ColorText).Render(m.queryPK)
+		modeBadge = ui.StyleModeBadgeQuery.Render("query")
+		q := ui.StyleKeyLabel.Render("pk=") +
+			ui.StyleValueLabel.Render(m.queryPK)
 		if m.querySK != "" {
-			q += lipgloss.NewStyle().Foreground(ui.ColorAccent).Render("  sk=") +
-				lipgloss.NewStyle().Foreground(ui.ColorText).Render(m.querySK)
+			q += ui.StyleKeyLabel.Render("  sk=") +
+				ui.StyleValueLabel.Render(m.querySK)
 		}
 		modeBadge += "  " + q
 	} else {
-		modeBadge = lipgloss.NewStyle().
-			Foreground(ui.ColorBg).Background(ui.ColorMuted).
-			PaddingLeft(1).PaddingRight(1).Render("scan")
+		modeBadge = ui.StyleModeBadgeScan.Render("scan")
 	}
 	if m.filterExpr != "" {
-		modeBadge += lipgloss.NewStyle().Foreground(ui.ColorMuted).Render("  filter: ") +
-			lipgloss.NewStyle().Foreground(ui.ColorSubtext).Render(m.filterExpr)
+		modeBadge += ui.StyleFilterLabel.Render("  filter: ") +
+			ui.StyleFilterValue.Render(m.filterExpr)
 	}
 	page := fmt.Sprintf("page %d", m.currentPage+1)
 	if m.hasMore {
 		page += "+"
 	}
-	pagePart := lipgloss.NewStyle().Foreground(ui.ColorMuted).Render("  " + page)
+	pagePart := ui.StylePageIndicator.Render("  " + page)
 
-	return lipgloss.NewStyle().PaddingLeft(2).Render(title + "  " + modeBadge + pagePart)
+	return ui.StyleItemsHeader.Width(m.width).Render(title + "  " + modeBadge + pagePart)
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -439,40 +474,53 @@ func (m *ItemsModel) rebuildTable() {
 	})
 	m.columns = cols
 
-	// Build table columns — divide width evenly, min 10 chars each.
+	// Build table columns — divide available width evenly, distributing any
+	// remainder across the first N columns so the header fills the terminal
+	// exactly with no unused space on the right.  Each cell gets 2 chars of
+	// horizontal padding from bubbles/table's default style (Padding(0,1)),
+	// so we subtract len(cols)*2 before dividing.
 	colWidth := 20
+	remainder := 0
 	if m.width > 0 && len(cols) > 0 {
-		colWidth = (m.width - 4) / len(cols)
-		if colWidth < 10 {
-			colWidth = 10
-		}
-		if colWidth > 40 {
-			colWidth = 40
+		available := m.width - 2 - len(cols)*2
+		colWidth = available / len(cols)
+		remainder = available % len(cols)
+		if colWidth < 1 {
+			colWidth = 1
+			remainder = 0
 		}
 	}
 
 	tCols := make([]table.Column, len(cols))
 	for i, c := range cols {
-		tCols[i] = table.Column{Title: c, Width: colWidth}
+		w := colWidth
+		if i < remainder {
+			w++ // distribute leftover chars to the first N columns
+		}
+		if i == 0 {
+			w += 2 // extra width for "› " / "  " cursor prefix
+		}
+		tCols[i] = table.Column{Title: c, Width: w}
 	}
 
-	// Build rows.
-	rows := make([]table.Row, len(items))
+	// Build raw rows (no cursor prefix); injectCursor adds "› " / "  " at render time.
+	raw := make([]table.Row, len(items))
 	for i, item := range items {
 		row := make(table.Row, len(cols))
 		for j, col := range cols {
+			val := "—"
 			if av, ok := item[col]; ok {
-				row[j] = attrValueString(av)
-			} else {
-				row[j] = "—"
+				val = attrValueString(av)
 			}
+			row[j] = val
 		}
-		rows[i] = row
+		raw[i] = row
 	}
+	m.rawRows = raw
 
 	m.table.SetRows(nil)
 	m.table.SetColumns(tCols)
-	m.table.SetRows(rows)
+	m.injectCursor()
 	m.resizeTable()
 }
 
@@ -482,8 +530,37 @@ func (m *ItemsModel) resizeTable() {
 	}
 	if m.width > 0 {
 		m.table.SetWidth(m.width)
-		m.table.SetStyles(tableStyles())
+		m.table.SetStyles(ui.DynamoTableStyles)
 	}
+}
+
+// injectCursor builds the display rows from m.rawRows by prepending "› " to the
+// first column of the selected row and "  " to all others, then sets them on
+// m.table.  Call this whenever rawRows or the cursor position changes.
+func (m *ItemsModel) injectCursor() {
+	if len(m.rawRows) == 0 {
+		m.table.SetRows(nil)
+		return
+	}
+	cursor := m.table.Cursor()
+	display := make([]table.Row, len(m.rawRows))
+	for i, raw := range m.rawRows {
+		row := make(table.Row, len(raw))
+		copy(row, raw)
+		if len(row) > 0 {
+			if i == cursor {
+				// Use plain text prefix here — no pre-rendered ANSI.  The cursor
+				// glyph's accent colour is applied later in View() after the full
+				// selected-row highlight has been rendered, avoiding embedded
+				// \x1b[0m resets that would cancel the background mid-line.
+				row[0] = "› " + raw[0]
+			} else {
+				row[0] = "  " + raw[0]
+			}
+		}
+		display[i] = row
+	}
+	m.table.SetRows(display)
 }
 
 // IsTextInputActive implements ui.TextInputActive. Returns true while a prompt
