@@ -208,7 +208,7 @@ func (a *App) setTop(m tea.Model) {
 func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Handle overlays first.
 	if a.helpOverlay != nil {
-		if msg.String() == "?" || msg.String() == "esc" || msg.String() == "q" {
+		if msg.String() == "?" || msg.String() == "esc" {
 			a.helpOverlay = nil
 		}
 		return a, nil
@@ -247,7 +247,7 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// Global bindings.
 	switch msg.String() {
-	case "ctrl+c", "q":
+	case "ctrl+c":
 		return a, tea.Quit
 	case "?":
 		ho := NewHelpOverlay()

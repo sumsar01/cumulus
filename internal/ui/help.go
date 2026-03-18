@@ -34,7 +34,7 @@ func (h *HelpOverlay) View(width, height int) string {
 	sep := styleSep.Render("────────────────────────────────────────")
 
 	global := header("Global") +
-		row("q / ctrl+c", "quit") +
+		row("ctrl+c", "quit") +
 		row("p", "switch AWS profile") +
 		row("t", "switch theme") +
 		row("?", "toggle help") +

@@ -84,6 +84,7 @@ func NewNavigator(cfg aws.Config) Navigator {
 	l.SetShowTitle(false)
 	l.SetShowStatusBar(false)
 	l.SetShowHelp(false)
+	l.DisableQuitKeybindings()
 	l.SetFilteringEnabled(true)
 	l.Styles.NoItems = StyleDimmed
 
@@ -159,7 +160,7 @@ func (n Navigator) View() string {
 	}
 	n.list.SetSize(panelInnerW, listH)
 
-	hint := StyleDimmed.Background(bg).Render("↑/↓  navigate   enter  select   /  filter   p  switch profile   ?  help   q  quit")
+	hint := StyleDimmed.Background(bg).Render("↑/↓  navigate   enter  select   /  filter   p  switch profile   ?  help   ctrl+c  quit")
 
 	inner := lipgloss.JoinVertical(lipgloss.Left,
 		header,

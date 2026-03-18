@@ -43,7 +43,7 @@ func (s StatusBar) View() string {
 	// Right side: hints (hidden when there is an error/status on the line below)
 	right := ""
 	if s.Err == "" && s.Status == "" {
-		right = StyleStatusHints.Render("p  profile   t  theme   ?  help   q  quit ")
+		right = StyleStatusHints.Render("p  profile   t  theme   ?  help   ctrl+c  quit ")
 	}
 
 	gap := s.Width - lipgloss.Width(left) - lipgloss.Width(right)
