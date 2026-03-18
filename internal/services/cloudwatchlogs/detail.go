@@ -119,6 +119,7 @@ func (m EventDetailModel) View() string {
 
 // renderContent returns a styled string for the viewport.
 // If the message is valid JSON it is pretty-printed; otherwise it is shown as-is.
+// Each line is padded to m.width so the theme background covers the full row.
 func (m *EventDetailModel) renderContent() string {
 	msg := strings.TrimRight(m.event.message, "\n")
 
@@ -132,7 +133,12 @@ func (m *EventDetailModel) renderContent() string {
 		}
 	}
 
-	return lipgloss.NewStyle().Background(ui.ColorBg).Foreground(ui.ColorText).Render(msg)
+	lineStyle := lipgloss.NewStyle().Background(ui.ColorBg).Foreground(ui.ColorText).Width(m.width)
+	lines := strings.Split(msg, "\n")
+	for i, line := range lines {
+		lines[i] = lineStyle.Render(line)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // copyEventToClipboard writes the event message to the terminal clipboard via OSC 52.
