@@ -362,7 +362,7 @@ func ApplyTheme(t *Theme) {
 	StyleStatusBar = lipgloss.NewStyle().Background(ColorSurface).Foreground(ColorSubtext)
 	StyleStatusBarSep = lipgloss.NewStyle().Foreground(ColorAccent)
 	StylePill = lipgloss.NewStyle().Background(ColorHighlight).Foreground(ColorPrimary).Bold(true).PaddingLeft(1).PaddingRight(1)
-	StylePanel = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(ColorBorder).Padding(0, 1)
+	StylePanel = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(ColorBorder).BorderBackground(ColorBg).Padding(0, 1)
 	StyleKey = lipgloss.NewStyle().Foreground(ColorAccent).Bold(true)
 	StyleFooterBar = lipgloss.NewStyle().Background(ColorSurface).Foreground(ColorMuted)
 
@@ -417,10 +417,7 @@ func ApplyTheme(t *Theme) {
 	StyleItemsHeader = lipgloss.NewStyle().PaddingLeft(2).Background(ColorBg)
 
 	// ── Detail view styles ────────────────────────────────────────────────────
-	StyleViewportBorder = lipgloss.NewStyle().
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(ColorBorder).
-		Background(ColorBg)
+	StyleViewportBorder = lipgloss.NewStyle().Background(ColorBg)
 
 	// ── DynamoDB table widget styles ──────────────────────────────────────────
 	DynamoTableStyles = buildDynamoTableStyles()
@@ -433,6 +430,7 @@ func buildDynamoTableStyles() table.Styles {
 	s.Header = s.Header.
 		BorderStyle(lipgloss.NormalBorder()).
 		BorderForeground(ColorBorder).
+		BorderBackground(ColorBg).
 		BorderBottom(true).
 		Foreground(ColorMuted).
 		Background(ColorSurface).
@@ -519,6 +517,7 @@ var (
 	StylePanel = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(ColorBorder).
+			BorderBackground(ColorBg).
 			Padding(0, 1)
 
 	// Key hint used in help rows and footer bars.
@@ -676,10 +675,7 @@ var (
 // Detail view styles.
 var (
 	// StyleViewportBorder is the style applied to the detail viewport.
-	StyleViewportBorder = lipgloss.NewStyle().
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(ColorBorder).
-		Background(ColorBg)
+	StyleViewportBorder = lipgloss.NewStyle().Background(ColorBg)
 )
 
 // DynamoTableStyles is the bubbles/table style set for the items table widget.

@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/bubbles/table"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	awspkg "github.com/sumsar01/cumulus/internal/aws"
 	"github.com/sumsar01/cumulus/internal/config"
 	"github.com/sumsar01/cumulus/internal/ui"
@@ -339,7 +340,52 @@ func (m ItemsModel) View() string {
 		{"/", "filter"}, {"Q", "query"}, {"r", "refresh"}, {"←/→", "pages"},
 	})
 
-	return header + "\n" + sep + "\n" + m.table.View() + "\n" + hints
+	// Re-style every line emitted by the table widget (including the blank
+	// viewport-padding lines) to force the theme background colour.  Without
+	// this, bubbles/table's internal viewport fills unused rows with a bare
+	// lipgloss.NewStyle() — no background — which renders as terminal-default
+	// black on Tokyo Night.
+	//
+	// The selected row requires special handling to get a full-width highlight:
+	//
+	//   1. bubbles/table's Selected style has no Width, so it never pads to the
+	//      terminal edge.
+	//   2. injectCursor() stores a plain "› " prefix (no pre-rendered ANSI) in
+	//      column 0, so there are no embedded \x1b[0m resets inside the row text
+	//      that would cancel a wrapping background mid-line.
+	//   3. We strip any residual ANSI codes from the selected line, re-render it
+	//      with the full-width selectedStyle, then re-inject the coloured cursor
+	//      glyph so it retains its accent colour against the highlight background.
+	//
+	// bubbles/table output layout after strings.Split on "\n":
+	//   line 0  — header row
+	//   line 1  — header bottom border
+	//   line 2+ — data rows  (index 2 + cursor = selected row)
+	lineStyle := lipgloss.NewStyle().Background(ui.ColorBg).MaxWidth(m.width).Width(m.width)
+	selectedStyle := lipgloss.NewStyle().
+		Background(ui.ColorHighlight).
+		Foreground(ui.ColorText).
+		Bold(true).
+		MaxWidth(m.width).
+		Width(m.width)
+	selectedLine := 2 + m.table.Cursor()
+	tableLines := strings.Split(m.table.View(), "\n")
+	for i, line := range tableLines {
+		if i == selectedLine {
+			// Strip existing ANSI codes so no embedded resets fight the new bg.
+			clean := ansi.Strip(line)
+			rendered := selectedStyle.Render(clean)
+			// Re-apply accent colour to the cursor glyph that injectCursor placed
+			// as plain text at the start of column 0.
+			rendered = strings.Replace(rendered, "› ", ui.StyleCursor.Render("›")+" ", 1)
+			tableLines[i] = rendered
+		} else {
+			tableLines[i] = lineStyle.Render(line)
+		}
+	}
+
+	body := header + "\n" + sep + "\n" + strings.Join(tableLines, "\n") + "\n" + hints
+	return body
 }
 
 func (m ItemsModel) headerView() string {
@@ -428,21 +474,29 @@ func (m *ItemsModel) rebuildTable() {
 	})
 	m.columns = cols
 
-	// Build table columns — divide width evenly, min 10 chars each.
+	// Build table columns — divide available width evenly, distributing any
+	// remainder across the first N columns so the header fills the terminal
+	// exactly with no unused space on the right.  Each cell gets 2 chars of
+	// horizontal padding from bubbles/table's default style (Padding(0,1)),
+	// so we subtract len(cols)*2 before dividing.
 	colWidth := 20
+	remainder := 0
 	if m.width > 0 && len(cols) > 0 {
-		colWidth = (m.width - 4) / len(cols)
-		if colWidth < 10 {
-			colWidth = 10
-		}
-		if colWidth > 40 {
-			colWidth = 40
+		available := m.width - 2 - len(cols)*2
+		colWidth = available / len(cols)
+		remainder = available % len(cols)
+		if colWidth < 1 {
+			colWidth = 1
+			remainder = 0
 		}
 	}
 
 	tCols := make([]table.Column, len(cols))
 	for i, c := range cols {
 		w := colWidth
+		if i < remainder {
+			w++ // distribute leftover chars to the first N columns
+		}
 		if i == 0 {
 			w += 2 // extra width for "› " / "  " cursor prefix
 		}
@@ -495,7 +549,11 @@ func (m *ItemsModel) injectCursor() {
 		copy(row, raw)
 		if len(row) > 0 {
 			if i == cursor {
-				row[0] = ui.StyleCursor.Render("›") + " " + raw[0]
+				// Use plain text prefix here — no pre-rendered ANSI.  The cursor
+				// glyph's accent colour is applied later in View() after the full
+				// selected-row highlight has been rendered, avoiding embedded
+				// \x1b[0m resets that would cancel the background mid-line.
+				row[0] = "› " + raw[0]
 			} else {
 				row[0] = "  " + raw[0]
 			}

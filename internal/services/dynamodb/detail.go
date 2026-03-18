@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	ddbtypes "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -42,8 +43,13 @@ func NewDetailModel(item map[string]ddbtypes.AttributeValue, tableName string, w
 
 // initViewport creates or recreates the viewport for the given dimensions.
 func (m *DetailModel) initViewport(width, height int) {
-	headerH := 3
-	footerH := 2
+	// Layout: title(1) + sep(1) + viewport(N) + hints(1)
+	// Each section is separated by a "\n" in View(), adding 3 more lines.
+	// Total non-viewport lines = 1+1+1 = 3; each \n separator = 3 more → but
+	// those newlines are *within* the returned string so the terminal counts
+	// title+sep+hints = 3 logical lines consumed outside the viewport.
+	headerH := 2 // title + sep
+	footerH := 1 // hints
 	vp := viewport.New(width, height-headerH-footerH)
 	vp.Style = ui.StyleViewportBorder
 	vp.SetContent(m.renderJSON())
@@ -96,7 +102,18 @@ func (m DetailModel) View() string {
 			ui.StyleMuted.Background(ui.ColorBg).Render(scrollPct),
 	)
 
-	return title + "\n" + m.viewport.View() + "\n" + hints
+	sep := ui.HorizontalSep(m.width)
+
+	// Re-style every viewport line to force the theme background on blank
+	// padding rows — bubbles/viewport fills unused height with a bare
+	// lipgloss.NewStyle() (no background), which renders as terminal-default black.
+	lineStyle := lipgloss.NewStyle().Background(ui.ColorBg).Width(m.width)
+	vpLines := strings.Split(m.viewport.View(), "\n")
+	for i, line := range vpLines {
+		vpLines[i] = lineStyle.Render(line)
+	}
+
+	return title + "\n" + sep + "\n" + strings.Join(vpLines, "\n") + "\n" + hints
 }
 
 // renderJSON returns a pretty-printed JSON string of the item, styled with
