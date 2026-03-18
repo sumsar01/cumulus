@@ -7,6 +7,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
+	cwltypes "github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs/types"
 	tea "github.com/charmbracelet/bubbletea"
 	awspkg "github.com/sumsar01/cumulus/internal/aws"
 )
@@ -60,7 +61,7 @@ func fetchLogStreamsCmd(cfg aws.Config, groupName string) tea.Cmd {
 		for {
 			out, err := client.DescribeLogStreams(ctx, &cloudwatchlogs.DescribeLogStreamsInput{
 				LogGroupName: aws.String(groupName),
-				OrderBy:      "LastEventTime",
+				OrderBy:      cwltypes.OrderByLastEventTime,
 				Descending:   aws.Bool(true),
 				NextToken:    nextToken,
 			})
