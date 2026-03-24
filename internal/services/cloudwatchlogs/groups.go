@@ -65,6 +65,16 @@ func (m LogGroupsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.filtering = false
 		return m, tea.Batch(m.spinner.Tick, fetchLogGroupsCmd(m.cfg))
 
+	case awspkg.RegionChangedMsg:
+		m.cfg = msg.Cfg
+		m.loading = true
+		m.err = nil
+		m.groups = nil
+		m.cursor = 0
+		m.filter = ""
+		m.filtering = false
+		return m, tea.Batch(m.spinner.Tick, fetchLogGroupsCmd(m.cfg))
+
 	case logGroupsLoadedMsg:
 		m.loading = false
 		m.groups = msg.groups

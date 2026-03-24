@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	awspkg "github.com/sumsar01/cumulus/internal/aws"
 	"github.com/sumsar01/cumulus/internal/services"
 )
 
@@ -109,6 +110,12 @@ func (n Navigator) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		n.width = msg.Width
 		n.height = msg.Height
 
+	case awspkg.ProfileChangedMsg:
+		n.cfg = msg.Cfg
+
+	case awspkg.RegionChangedMsg:
+		n.cfg = msg.Cfg
+
 	case tea.KeyMsg:
 		// When the list is filtering, let it handle all keys.
 		if n.list.FilterState() == list.Filtering {
@@ -160,7 +167,7 @@ func (n Navigator) View() string {
 	}
 	n.list.SetSize(panelInnerW, listH)
 
-	hint := StyleDimmed.Background(bg).Render("↑/↓  navigate   enter  select   /  filter   p  switch profile   ?  help   ctrl+c  quit")
+	hint := StyleDimmed.Background(bg).Render("↑/↓  navigate   enter  select   /  filter   p  profile   R  region   ?  help   ctrl+c  quit")
 
 	inner := lipgloss.JoinVertical(lipgloss.Left,
 		header,

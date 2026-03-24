@@ -102,6 +102,17 @@ func (m MessagesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.table.SetColumns(nil)
 		return m, nil
 
+	case awspkg.RegionChangedMsg:
+		m.cfg = msg.Cfg
+		m.messages = nil
+		m.rawRows = nil
+		m.dlqArn = ""
+		m.sourceQueueArn = ""
+		m.err = nil
+		m.table.SetRows(nil)
+		m.table.SetColumns(nil)
+		return m, nil
+
 	case spinner.TickMsg:
 		if m.loading {
 			sp, cmd := m.spinner.Update(msg)

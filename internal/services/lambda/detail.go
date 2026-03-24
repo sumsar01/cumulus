@@ -80,6 +80,14 @@ func (m FunctionDetailModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.initViewport(m.width, m.height)
 		return m, tea.Batch(m.spinner.Tick, fetchFunctionDetailCmd(m.cfg, m.functionName))
 
+	case awspkg.RegionChangedMsg:
+		m.cfg = msg.Cfg
+		m.loading = true
+		m.err = nil
+		m.detail = nil
+		m.initViewport(m.width, m.height)
+		return m, tea.Batch(m.spinner.Tick, fetchFunctionDetailCmd(m.cfg, m.functionName))
+
 	case functionDetailLoadedMsg:
 		m.loading = false
 		m.detail = msg.output
@@ -174,6 +182,8 @@ func (m *FunctionDetailModel) initViewport(width, height int) {
 }
 
 // renderContent builds the styled text content for the viewport.
+// Every line is padded to m.width with the theme background so the viewport
+// never shows the terminal-default (black) colour on partially-filled rows.
 func (m *FunctionDetailModel) renderContent() string {
 	var b strings.Builder
 
@@ -183,6 +193,17 @@ func (m *FunctionDetailModel) renderContent() string {
 		cfg = *m.detail.Configuration
 	}
 
+	// lineW forces every emitted line to span the full viewport width with the
+	// correct background — this is the same technique used by the DynamoDB
+	// detail view to prevent terminal-default black gaps on short lines.
+	lineW := m.width
+	if lineW < 1 {
+		lineW = 80
+	}
+	line := func(s string) string {
+		return lipgloss.NewStyle().Background(ui.ColorBg).Width(lineW).Render(s) + "\n"
+	}
+
 	kStyle := lipgloss.NewStyle().Foreground(ui.ColorAccent).Background(ui.ColorBg).Bold(true)
 	vStyle := lipgloss.NewStyle().Foreground(ui.ColorText).Background(ui.ColorBg)
 	muted := lipgloss.NewStyle().Foreground(ui.ColorMuted).Background(ui.ColorBg)
@@ -190,12 +211,15 @@ func (m *FunctionDetailModel) renderContent() string {
 	masked := lipgloss.NewStyle().Foreground(ui.ColorMuted).Background(ui.ColorBg)
 
 	row := func(key, value string) {
-		b.WriteString(kStyle.Render(padRight(key, 22)) + vStyle.Render(value) + "\n")
+		b.WriteString(line(kStyle.Render(padRight(key, 22)) + vStyle.Render(value)))
 	}
+	blank := func() { b.WriteString(line("")) }
+	sep := func() { b.WriteString(line(muted.Render(strings.Repeat("─", 40)))) }
+	hdr := func(title string) { b.WriteString(line(section.Render(title))) }
 
 	// ── General ───────────────────────────────────────────────────────────────
-	b.WriteString(section.Render("General") + "\n")
-	b.WriteString(muted.Render(strings.Repeat("─", 40)) + "\n")
+	hdr("General")
+	sep()
 	row("ARN", aws.ToString(cfg.FunctionArn))
 	row("Description", nonEmpty(aws.ToString(cfg.Description)))
 	row("Runtime", string(cfg.Runtime))
@@ -204,11 +228,11 @@ func (m *FunctionDetailModel) renderContent() string {
 	row("Architectures", joinArchs(cfg.Architectures))
 	row("Code size", fmt.Sprintf("%d bytes", cfg.CodeSize))
 	row("Last modified", aws.ToString(cfg.LastModified))
-	b.WriteString("\n")
+	blank()
 
 	// ── Resources ─────────────────────────────────────────────────────────────
-	b.WriteString(section.Render("Resources") + "\n")
-	b.WriteString(muted.Render(strings.Repeat("─", 40)) + "\n")
+	hdr("Resources")
+	sep()
 	if cfg.MemorySize != nil {
 		row("Memory", fmt.Sprintf("%d MB", *cfg.MemorySize))
 	}
@@ -218,68 +242,65 @@ func (m *FunctionDetailModel) renderContent() string {
 	if cfg.EphemeralStorage != nil {
 		row("Ephemeral storage", fmt.Sprintf("%d MB", aws.ToInt32(cfg.EphemeralStorage.Size)))
 	}
-	b.WriteString("\n")
+	blank()
 
 	// ── Permissions ───────────────────────────────────────────────────────────
-	b.WriteString(section.Render("Permissions") + "\n")
-	b.WriteString(muted.Render(strings.Repeat("─", 40)) + "\n")
+	hdr("Permissions")
+	sep()
 	row("Role", aws.ToString(cfg.Role))
 	if cfg.KMSKeyArn != nil {
 		row("KMS key ARN", aws.ToString(cfg.KMSKeyArn))
 	}
-	b.WriteString("\n")
+	blank()
 
 	// ── VPC ───────────────────────────────────────────────────────────────────
 	if cfg.VpcConfig != nil && aws.ToString(cfg.VpcConfig.VpcId) != "" {
-		b.WriteString(section.Render("VPC") + "\n")
-		b.WriteString(muted.Render(strings.Repeat("─", 40)) + "\n")
+		hdr("VPC")
+		sep()
 		row("VPC ID", aws.ToString(cfg.VpcConfig.VpcId))
 		row("Subnets", strings.Join(cfg.VpcConfig.SubnetIds, ", "))
 		row("Security groups", strings.Join(cfg.VpcConfig.SecurityGroupIds, ", "))
-		b.WriteString("\n")
+		blank()
 	}
 
 	// ── Environment variables (keys only, values masked) ─────────────────────
 	if cfg.Environment != nil && len(cfg.Environment.Variables) > 0 {
-		b.WriteString(section.Render(fmt.Sprintf("Environment Variables (%d)", len(cfg.Environment.Variables))) + "\n")
-		b.WriteString(muted.Render(strings.Repeat("─", 40)) + "\n")
+		hdr(fmt.Sprintf("Environment Variables (%d)", len(cfg.Environment.Variables)))
+		sep()
 		keys := make([]string, 0, len(cfg.Environment.Variables))
 		for k := range cfg.Environment.Variables {
 			keys = append(keys, k)
 		}
 		sort.Strings(keys)
 		for _, k := range keys {
-			b.WriteString(
-				kStyle.Render(padRight(k, 30)) +
-					masked.Render("****") + "\n",
-			)
+			b.WriteString(line(kStyle.Render(padRight(k, 30)) + masked.Render("****")))
 		}
-		b.WriteString("\n")
+		blank()
 	}
 
 	// ── Layers ────────────────────────────────────────────────────────────────
 	if len(cfg.Layers) > 0 {
-		b.WriteString(section.Render(fmt.Sprintf("Layers (%d)", len(cfg.Layers))) + "\n")
-		b.WriteString(muted.Render(strings.Repeat("─", 40)) + "\n")
+		hdr(fmt.Sprintf("Layers (%d)", len(cfg.Layers)))
+		sep()
 		for _, l := range cfg.Layers {
-			b.WriteString(vStyle.Render("  "+aws.ToString(l.Arn)) + "\n")
+			b.WriteString(line(vStyle.Render("  " + aws.ToString(l.Arn))))
 		}
-		b.WriteString("\n")
+		blank()
 	}
 
 	// ── Tags (only available in full GetFunction response) ────────────────────
 	if m.detail != nil && len(m.detail.Tags) > 0 {
-		b.WriteString(section.Render(fmt.Sprintf("Tags (%d)", len(m.detail.Tags))) + "\n")
-		b.WriteString(muted.Render(strings.Repeat("─", 40)) + "\n")
+		hdr(fmt.Sprintf("Tags (%d)", len(m.detail.Tags)))
+		sep()
 		tagKeys := make([]string, 0, len(m.detail.Tags))
 		for k := range m.detail.Tags {
 			tagKeys = append(tagKeys, k)
 		}
 		sort.Strings(tagKeys)
 		for _, k := range tagKeys {
-			b.WriteString(kStyle.Render(padRight(k, 30)) + vStyle.Render(m.detail.Tags[k]) + "\n")
+			b.WriteString(line(kStyle.Render(padRight(k, 30)) + vStyle.Render(m.detail.Tags[k])))
 		}
-		b.WriteString("\n")
+		blank()
 	}
 
 	return b.String()

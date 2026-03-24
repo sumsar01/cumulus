@@ -36,6 +36,8 @@ func (e ErrMsg) Error() string { return e.Err.Error() }
 // EC2 IMDS is explicitly disabled since cumulus runs as a local developer tool
 // and the IMDS endpoint is unreachable outside EC2 (causing slow retries).
 // No credentials are read or stored by cumulus itself.
+// The region fallback (env vars → "us-east-1") is always injected into cfg.Region
+// so AWS service clients can always resolve their endpoints.
 func LoadDefault(ctx context.Context) (aws.Config, error) {
 	cfg, err := config.LoadDefaultConfig(ctx,
 		config.WithEC2IMDSClientEnableState(imds.ClientDisabled),
@@ -43,11 +45,13 @@ func LoadDefault(ctx context.Context) (aws.Config, error) {
 	if err != nil {
 		return aws.Config{}, fmt.Errorf("loading AWS config: %w", err)
 	}
+	cfg.Region, _ = RegionFromConfig(cfg)
 	return cfg, nil
 }
 
 // LoadProfile initialises an aws.Config for the named profile.
 // EC2 IMDS is disabled for the same reason as LoadDefault.
+// The region fallback is injected into cfg.Region when the profile has no region.
 func LoadProfile(ctx context.Context, profile string) (aws.Config, error) {
 	cfg, err := config.LoadDefaultConfig(ctx,
 		config.WithSharedConfigProfile(profile),
@@ -56,6 +60,7 @@ func LoadProfile(ctx context.Context, profile string) (aws.Config, error) {
 	if err != nil {
 		return aws.Config{}, fmt.Errorf("loading AWS config for profile %q: %w", profile, err)
 	}
+	cfg.Region, _ = RegionFromConfig(cfg)
 	return cfg, nil
 }
 
@@ -73,6 +78,22 @@ func LoadProfileCmd(profile string) tea.Cmd {
 			Profile: profile,
 			Region:  region,
 		}
+	}
+}
+
+// RegionChangedMsg is broadcast whenever the active AWS region changes.
+// All views should handle this identically to ProfileChangedMsg.
+type RegionChangedMsg struct {
+	Cfg    aws.Config
+	Region string
+}
+
+// SwitchRegionCmd returns a bubbletea Cmd that clones the current aws.Config
+// with the given region and emits a RegionChangedMsg.
+func SwitchRegionCmd(cfg aws.Config, region string) tea.Cmd {
+	return func() tea.Msg {
+		cfg.Region = region
+		return RegionChangedMsg{Cfg: cfg, Region: region}
 	}
 }
 

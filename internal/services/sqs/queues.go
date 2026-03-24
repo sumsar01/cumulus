@@ -66,6 +66,18 @@ func (m QueuesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.filtering = false
 		return m, tea.Batch(m.spinner.Tick, fetchQueuesCmd(m.cfg, nil))
 
+	case awspkg.RegionChangedMsg:
+		m.cfg = msg.Cfg
+		m.loading = true
+		m.err = nil
+		m.queues = nil
+		m.nextToken = nil
+		m.hasMore = false
+		m.cursor = 0
+		m.filter = ""
+		m.filtering = false
+		return m, tea.Batch(m.spinner.Tick, fetchQueuesCmd(m.cfg, nil))
+
 	case queuesLoadedMsg:
 		m.loading = false
 		m.queues = append(m.queues, msg.queues...)

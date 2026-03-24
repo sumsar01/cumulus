@@ -99,6 +99,19 @@ func (m LogEventsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = nil
 		return m, tea.Batch(m.spinner.Tick, fetchLogEventsCmd(m.cfg, m.groupName, m.streamName, "", ""))
 
+	case awspkg.RegionChangedMsg:
+		m.cfg = msg.Cfg
+		m.events = nil
+		m.nextToken = ""
+		m.prevToken = ""
+		m.hasMore = false
+		m.filterPattern = ""
+		m.filtering = false
+		m.pendingFilter = ""
+		m.loading = true
+		m.err = nil
+		return m, tea.Batch(m.spinner.Tick, fetchLogEventsCmd(m.cfg, m.groupName, m.streamName, "", ""))
+
 	case logEventsLoadedMsg:
 		m.loading = false
 		m.events = msg.events

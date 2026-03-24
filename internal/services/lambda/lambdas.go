@@ -55,6 +55,17 @@ func (m LambdasModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.filtering = false
 		return m, tea.Batch(m.spinner.Tick, fetchFunctionsCmd(m.cfg, nil))
 
+	case awspkg.RegionChangedMsg:
+		m.cfg = msg.Cfg
+		m.loading = true
+		m.err = nil
+		m.functions = nil
+		m.nextToken = nil
+		m.cursor = 0
+		m.filter = ""
+		m.filtering = false
+		return m, tea.Batch(m.spinner.Tick, fetchFunctionsCmd(m.cfg, nil))
+
 	case functionsLoadedMsg:
 		m.loading = false
 		m.functions = append(m.functions, msg.functions...)

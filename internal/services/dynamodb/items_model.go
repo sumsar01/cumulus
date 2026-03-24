@@ -145,6 +145,11 @@ func (m ItemsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.reset()
 		return m, tea.Batch(m.spinner.Tick, m.freshFetchCmd())
 
+	case awspkg.RegionChangedMsg:
+		m.cfg = msg.Cfg
+		m.reset()
+		return m, tea.Batch(m.spinner.Tick, m.freshFetchCmd())
+
 	case spinner.TickMsg:
 		if m.loading {
 			sp, cmd := m.spinner.Update(msg)

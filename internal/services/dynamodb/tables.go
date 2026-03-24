@@ -59,6 +59,16 @@ func (m TablesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.filtering = false
 		return m, tea.Batch(m.spinner.Tick, fetchTablesCmd(m.cfg))
 
+	case awspkg.RegionChangedMsg:
+		m.cfg = msg.Cfg
+		m.loading = true
+		m.err = nil
+		m.tables = nil
+		m.cursor = 0
+		m.filter = ""
+		m.filtering = false
+		return m, tea.Batch(m.spinner.Tick, fetchTablesCmd(m.cfg))
+
 	case tablesLoadedMsg:
 		m.loading = false
 		m.tables = msg.tables
