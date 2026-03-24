@@ -3,7 +3,7 @@
 ## Project Overview
 
 **cumulus** — a terminal UI for AWS, built with [Bubble Tea](https://github.com/charmbracelet/bubbletea).
-Module: `github.com/sumsar01/cumulus` | Binary: `cumulus` | Repo: `aws-tui`
+Module: `github.com/sumsar01/cumulus` | Binary: `cumulus` | Repo: `cumulus`
 
 Currently supports DynamoDB (browse, scan/query, edit items). Extensible via a service plugin interface.
 

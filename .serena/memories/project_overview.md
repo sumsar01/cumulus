@@ -1,4 +1,4 @@
-# aws-tui / cumulus project
+# cumulus project
 
 ## Purpose
 Terminal UI (TUI) for AWS services, starting with DynamoDB. Uses Tokyo Night dark theme throughout.

@@ -1,8 +1,15 @@
 # cumulus
 
-A terminal UI for AWS. Browse and manage DynamoDB tables without leaving your terminal.
+A terminal UI for AWS. Browse and manage AWS services without leaving your terminal.
 
-![Go version](https://img.shields.io/badge/go-1.25-blue)
+![Go version](https://img.shields.io/badge/go-1.21+-blue)
+
+## Supported services
+
+- **DynamoDB** — list tables, scan/query items, view detail, create/edit/delete items
+- **Lambda** — list functions, view configuration and detail
+- **CloudWatch Logs** — browse log groups, streams (prefix search), and log events (filter pattern)
+- **SQS** — list queues, poll messages, view detail, delete messages, redrive DLQ
 
 ## Install
 
@@ -13,8 +20,8 @@ go install github.com/sumsar01/cumulus@latest
 Or build from source:
 
 ```sh
-git clone https://github.com/sumsar01/aws-tui
-cd aws-tui
+git clone https://github.com/sumsar01/cumulus
+cd cumulus
 go build -o cumulus .
 ```
 
@@ -39,6 +46,7 @@ Credentials are resolved via the standard AWS SDK v2 chain — `aws sso login`, 
 | Key | Action |
 |-----|--------|
 | `p` | Switch AWS profile |
+| `r` | Switch AWS region |
 | `?` | Help overlay |
 | `Esc` | Go back |
 | `q` | Quit |
@@ -47,6 +55,7 @@ Credentials are resolved via the standard AWS SDK v2 chain — `aws sso login`, 
 
 | Key | Action |
 |-----|--------|
+| `↑/↓` | Navigate |
 | `Enter` | Open table |
 | `r` | Refresh |
 | `/` | Filter tables by name |
@@ -55,6 +64,7 @@ Credentials are resolved via the standard AWS SDK v2 chain — `aws sso login`, 
 
 | Key | Action |
 |-----|--------|
+| `↑/↓` | Navigate |
 | `Enter` | View item detail |
 | `e` | Edit item in editor |
 | `n` | New item |
@@ -73,6 +83,65 @@ Credentials are resolved via the standard AWS SDK v2 chain — `aws sso login`, 
 | `y` | Copy JSON to clipboard |
 | `Esc` | Back |
 
+### Lambda — function list
+
+| Key | Action |
+|-----|--------|
+| `↑/↓` | Navigate |
+| `Enter` | View function detail |
+| `/` | Filter by name |
+| `r` | Refresh |
+| `n` | Load more (pagination) |
+
+### CloudWatch Logs — log groups
+
+| Key | Action |
+|-----|--------|
+| `↑/↓` | Navigate |
+| `Enter` | Open log group |
+| `/` | Filter by name |
+| `r` | Refresh |
+
+### CloudWatch Logs — log streams
+
+| Key | Action |
+|-----|--------|
+| `↑/↓` | Navigate |
+| `Enter` | Open log stream |
+| `/` | Prefix search (server-side) |
+| `r` | Refresh |
+
+### CloudWatch Logs — log events
+
+| Key | Action |
+|-----|--------|
+| `↑/↓` | Navigate |
+| `Enter` | View event detail |
+| `/` | Filter pattern |
+| `r` | Refresh |
+| `n` | Next page |
+| `p` | Previous page |
+
+### SQS — queue list
+
+| Key | Action |
+|-----|--------|
+| `↑/↓` | Navigate |
+| `Enter` | Open queue |
+| `/` | Filter by name |
+| `r` | Refresh |
+| `n` | Next page |
+
+### SQS — messages
+
+| Key | Action |
+|-----|--------|
+| `↑/↓` | Navigate |
+| `Enter` | View message detail |
+| `r` | Poll for messages |
+| `d` | Delete message |
+| `R` | Redrive DLQ |
+
 ## Configuration
 
 cumulus looks for a config file at `~/.config/cumulus/config.toml` (honouring `$XDG_CONFIG_HOME`). The file is optional — defaults are used when it does not exist.
@@ -80,7 +149,8 @@ cumulus looks for a config file at `~/.config/cumulus/config.toml` (honouring `$
 ```toml
 # ~/.config/cumulus/config.toml
 
-editor = "nvim"  # default
+editor = "nvim"   # default
+theme  = "dark"   # dark (default) or light
 ```
 
 ### Editor allowlist
@@ -93,7 +163,7 @@ The binary is validated at config load time and again at exec time. It is never 
 
 ## IAM permissions
 
-cumulus needs the following DynamoDB actions:
+### DynamoDB
 
 ```json
 {
@@ -105,6 +175,49 @@ cumulus needs the following DynamoDB actions:
     "dynamodb:Query",
     "dynamodb:PutItem",
     "dynamodb:DeleteItem"
+  ],
+  "Resource": "*"
+}
+```
+
+### Lambda
+
+```json
+{
+  "Effect": "Allow",
+  "Action": [
+    "lambda:ListFunctions",
+    "lambda:GetFunction"
+  ],
+  "Resource": "*"
+}
+```
+
+### CloudWatch Logs
+
+```json
+{
+  "Effect": "Allow",
+  "Action": [
+    "logs:DescribeLogGroups",
+    "logs:DescribeLogStreams",
+    "logs:FilterLogEvents"
+  ],
+  "Resource": "*"
+}
+```
+
+### SQS
+
+```json
+{
+  "Effect": "Allow",
+  "Action": [
+    "sqs:ListQueues",
+    "sqs:GetQueueAttributes",
+    "sqs:ReceiveMessage",
+    "sqs:DeleteMessage",
+    "sqs:SendMessage"
   ],
   "Resource": "*"
 }
