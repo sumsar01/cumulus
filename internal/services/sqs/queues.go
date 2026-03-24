@@ -1,48 +1,53 @@
-package dynamodb
+package sqs
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	awspkg "github.com/sumsar01/cumulus/internal/aws"
-	"github.com/sumsar01/cumulus/internal/config"
 	"github.com/sumsar01/cumulus/internal/ui"
 )
 
-// tablesLoadedMsg carries the result of a ListTables API call.
-type tablesLoadedMsg struct{ tables []string }
+// queuesLoadedMsg carries the result of a ListQueues API call.
+type queuesLoadedMsg struct {
+	queues    []string // queue URLs
+	nextToken *string  // nil when there is no further page
+}
 
-// TablesModel lists all DynamoDB tables and lets the user select one.
-type TablesModel struct {
+// QueuesModel lists SQS queue URLs and lets the user select one.
+type QueuesModel struct {
 	cfg       aws.Config
-	appCfg    config.Config
-	tables    []string
+	queues    []string // all loaded queue URLs
+	nextToken *string  // token for the next page; nil if no further pages loaded yet
+	hasMore   bool     // true when the server indicated there is at least one more page
+
 	cursor    int
 	filter    string
-	filtering bool // true when the user is actively typing a filter
-	spinner   spinner.Model
-	loading   bool
-	err       error
-	width     int
-	height    int
+	filtering bool
+
+	spinner spinner.Model
+	loading bool
+	err     error
+	width   int
+	height  int
 }
 
-// NewTablesModel constructs the tables view.
-func NewTablesModel(cfg aws.Config, appCfg config.Config) TablesModel {
-	return TablesModel{cfg: cfg, appCfg: appCfg, spinner: ui.NewSpinner()}
+// NewQueuesModel constructs the queues view.
+func NewQueuesModel(cfg aws.Config) QueuesModel {
+	return QueuesModel{cfg: cfg, spinner: ui.NewSpinner(), loading: true}
 }
 
-func (m TablesModel) Init() tea.Cmd {
-	return tea.Batch(m.spinner.Tick, fetchTablesCmd(m.cfg))
+// Init fires the initial queue fetch.
+func (m QueuesModel) Init() tea.Cmd {
+	return tea.Batch(m.spinner.Tick, fetchQueuesCmd(m.cfg, nil))
 }
 
-func (m TablesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+// Update handles all messages for the queues view.
+func (m QueuesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 
 	case tea.WindowSizeMsg:
@@ -53,25 +58,31 @@ func (m TablesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.cfg = msg.Cfg
 		m.loading = true
 		m.err = nil
-		m.tables = nil
+		m.queues = nil
+		m.nextToken = nil
+		m.hasMore = false
 		m.cursor = 0
 		m.filter = ""
 		m.filtering = false
-		return m, tea.Batch(m.spinner.Tick, fetchTablesCmd(m.cfg))
+		return m, tea.Batch(m.spinner.Tick, fetchQueuesCmd(m.cfg, nil))
 
 	case awspkg.RegionChangedMsg:
 		m.cfg = msg.Cfg
 		m.loading = true
 		m.err = nil
-		m.tables = nil
+		m.queues = nil
+		m.nextToken = nil
+		m.hasMore = false
 		m.cursor = 0
 		m.filter = ""
 		m.filtering = false
-		return m, tea.Batch(m.spinner.Tick, fetchTablesCmd(m.cfg))
+		return m, tea.Batch(m.spinner.Tick, fetchQueuesCmd(m.cfg, nil))
 
-	case tablesLoadedMsg:
+	case queuesLoadedMsg:
 		m.loading = false
-		m.tables = msg.tables
+		m.queues = append(m.queues, msg.queues...)
+		m.nextToken = msg.nextToken
+		m.hasMore = msg.nextToken != nil
 		m.cursor = 0
 		return m, nil
 
@@ -96,7 +107,6 @@ func (m TablesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.filter = ""
 				m.cursor = 0
 			case "enter":
-				// Confirm filter, exit filter-input mode but keep the filter active.
 				m.filtering = false
 			case "backspace":
 				if len(m.filter) > 0 {
@@ -112,18 +122,25 @@ func (m TablesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// Normal (non-filtering) keybindings.
 		switch msg.String() {
 		case "/":
 			m.filtering = true
 		case "r":
 			m.loading = true
 			m.err = nil
-			m.tables = nil
+			m.queues = nil
+			m.nextToken = nil
+			m.hasMore = false
 			m.cursor = 0
 			m.filter = ""
 			m.filtering = false
-			return m, tea.Batch(m.spinner.Tick, fetchTablesCmd(m.cfg))
+			return m, tea.Batch(m.spinner.Tick, fetchQueuesCmd(m.cfg, nil))
+		case "n":
+			// Load the next page of queues.
+			if m.hasMore && !m.loading {
+				m.loading = true
+				return m, tea.Batch(m.spinner.Tick, fetchQueuesCmd(m.cfg, m.nextToken))
+			}
 		case "up", "k":
 			if m.cursor > 0 {
 				m.cursor--
@@ -143,13 +160,13 @@ func (m TablesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(vis) == 0 {
 				return m, nil
 			}
-			tableName := vis[m.cursor]
-			itemsModel := NewItemsModel(m.cfg, m.appCfg, tableName)
+			queueURL := vis[m.cursor]
+			msgsModel := NewMessagesModel(m.cfg, queueURL)
 			return m, tea.Batch(
-				itemsModel.Init(),
-				func() tea.Msg { return ui.PushMsg{Model: itemsModel} },
+				msgsModel.Init(),
+				func() tea.Msg { return ui.PushMsg{Model: msgsModel} },
 				func() tea.Msg {
-					return ui.SetBreadcrumbMsg{Crumbs: []string{"DynamoDB", tableName}}
+					return ui.SetBreadcrumbMsg{Crumbs: []string{"SQS", queueDisplayName(queueURL)}}
 				},
 			)
 		}
@@ -158,24 +175,32 @@ func (m TablesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// IsTextInputActive implements ui.TextInputActive. It returns true while the
-// user is typing a filter so that app.go passes all keys straight through
-// instead of intercepting global shortcuts.
-func (m TablesModel) IsTextInputActive() bool { return m.filtering }
+// IsTextInputActive implements ui.TextInputActive.
+func (m QueuesModel) IsTextInputActive() bool { return m.filtering }
 
-// visible returns tables matching the current filter.
-func (m *TablesModel) visible() []string {
+// visible returns queue URLs matching the current filter.
+func (m *QueuesModel) visible() []string {
 	if m.filter == "" {
-		return m.tables
+		return m.queues
 	}
 	var out []string
 	f := strings.ToLower(m.filter)
-	for _, t := range m.tables {
-		if strings.Contains(strings.ToLower(t), f) {
-			out = append(out, t)
+	for _, q := range m.queues {
+		if strings.Contains(strings.ToLower(q), f) {
+			out = append(out, q)
 		}
 	}
 	return out
+}
+
+// queueDisplayName extracts the queue name from its URL for display purposes.
+// SQS queue URLs have the form https://sqs.<region>.amazonaws.com/<account>/<name>.
+func queueDisplayName(url string) string {
+	parts := strings.Split(url, "/")
+	if len(parts) > 0 {
+		return parts[len(parts)-1]
+	}
+	return url
 }
 
 // isCredentialError returns true when err looks like an AWS credential failure.
@@ -190,9 +215,10 @@ func isCredentialError(err error) bool {
 		strings.Contains(msg, "NoCredentialProviders")
 }
 
-func (m TablesModel) View() string {
+// View renders the queues list.
+func (m QueuesModel) View() string {
 	if m.loading {
-		content := fmt.Sprintf("%s  Loading tables…", m.spinner.View())
+		content := fmt.Sprintf("%s  Loading queues…", m.spinner.View())
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content,
 			lipgloss.WithWhitespaceBackground(ui.ColorBg))
 	}
@@ -211,11 +237,15 @@ func (m TablesModel) View() string {
 	}
 
 	vis := m.visible()
-	total := len(m.tables)
+	total := len(m.queues)
 
-	// Header line — full terminal width.
-	title := ui.StyleTitle.Background(ui.ColorBg).Render("DynamoDB")
-	count := ui.StyleCount.Render(fmt.Sprintf("  %d / %d tables", len(vis), total))
+	// Header line.
+	title := ui.StyleTitle.Background(ui.ColorBg).Render("SQS")
+	countStr := fmt.Sprintf("  %d / %d queues", len(vis), total)
+	if m.hasMore {
+		countStr += "+"
+	}
+	count := ui.StyleCount.Render(countStr)
 	filterHint := ""
 	if m.filtering {
 		filterHint = "  " + ui.StyleKey.Background(ui.ColorBg).Render("/") +
@@ -227,16 +257,14 @@ func (m TablesModel) View() string {
 	}
 	header := ui.StyleItemsHeader.Width(m.width).Render(title + count + filterHint)
 
-	// Separator — full terminal width.
+	// Separator.
 	sep := ui.HorizontalSep(m.width)
 
-	// Table rows — each row at full terminal width.
+	// Rows.
 	maxRows := m.height - 4
 	if maxRows < 1 {
 		maxRows = 1
 	}
-
-	// Scroll window
 	start := 0
 	if m.cursor >= maxRows {
 		start = m.cursor - maxRows + 1
@@ -248,43 +276,46 @@ func (m TablesModel) View() string {
 
 	var rows strings.Builder
 	for i := start; i < end; i++ {
-		t := vis[i]
+		q := vis[i]
+		name := queueDisplayName(q)
 		if i == m.cursor {
 			hlSp := lipgloss.NewStyle().Background(ui.ColorHighlight).Render("  ")
 			row := ui.StyleListRowSelected.Width(m.width).Render(
 				hlSp +
 					ui.StyleListRowSelectedCursor.Render("›") +
 					hlSp +
-					ui.StyleListRowSelectedName.Render(t),
+					ui.StyleListRowSelectedName.Render(name),
 			)
 			rows.WriteString(row + "\n")
 		} else {
 			row := ui.StyleListRowNormal.Width(m.width).Render(
-				"     " + ui.StyleListRowNormalName.Render(t),
+				"     " + ui.StyleListRowNormalName.Render(name),
 			)
 			rows.WriteString(row + "\n")
 		}
 	}
 
 	if len(vis) == 0 && !m.filtering {
-		content := ui.StyleEmptyState.Render("no tables found")
+		content := ui.StyleEmptyState.Render("no queues found")
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content,
 			lipgloss.WithWhitespaceBackground(ui.ColorBg))
 	} else if len(vis) == 0 {
-		rows.WriteString(ui.StyleEmptyState.PaddingLeft(5).Render("no tables found\n"))
+		rows.WriteString(ui.StyleEmptyState.PaddingLeft(5).Render("no queues match filter\n"))
 	}
 
-	// Footer hints bar — full terminal width.
+	// Footer hints.
 	var pairs [][2]string
 	if m.filtering {
 		pairs = [][2]string{{"esc", "cancel filter"}, {"enter", "confirm"}}
 	} else {
 		pairs = [][2]string{{"↑/↓", "navigate"}, {"enter", "open"}, {"/", "filter"}, {"r", "refresh"}}
+		if m.hasMore {
+			pairs = append(pairs, [2]string{"n", "next page"})
+		}
 	}
 	hints := ui.RenderHints(m.width, pairs)
 
-	// Pad the row area so the hints bar is always pinned to the bottom.
-	// header(1) + sep(1) + hints(1) = 3 fixed lines; rest is for rows.
+	// Pad row area so hints are pinned to the bottom.
 	rowAreaHeight := m.height - 3
 	if rowAreaHeight < 1 {
 		rowAreaHeight = 1
@@ -295,31 +326,4 @@ func (m TablesModel) View() string {
 	}
 
 	return header + "\n" + sep + "\n" + rows.String() + hints
-}
-
-// fetchTablesCmd fetches all DynamoDB table names via paginated ListTables.
-func fetchTablesCmd(cfg aws.Config) tea.Cmd {
-	return func() tea.Msg {
-		client := dynamodb.NewFromConfig(cfg)
-		var tables []string
-		var lastEvaluated *string
-
-		for {
-			input := &dynamodb.ListTablesInput{}
-			if lastEvaluated != nil {
-				input.ExclusiveStartTableName = lastEvaluated
-			}
-			out, err := client.ListTables(context.Background(), input)
-			if err != nil {
-				return awspkg.ErrMsg{Err: fmt.Errorf("ListTables: %w", err)}
-			}
-			tables = append(tables, out.TableNames...)
-			if out.LastEvaluatedTableName == nil {
-				break
-			}
-			lastEvaluated = out.LastEvaluatedTableName
-		}
-
-		return tablesLoadedMsg{tables: tables}
-	}
 }

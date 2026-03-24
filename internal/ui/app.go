@@ -48,6 +48,7 @@ type App struct {
 
 	// overlays rendered on top of everything
 	profilePicker *ProfilePicker
+	regionPicker  *RegionPicker
 	themePicker   *ThemePicker
 	helpOverlay   *HelpOverlay
 }
@@ -106,6 +107,19 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			_ = config.Save(appCfg) // best-effort; ignore errors
 			return nil
 		})
+		// Broadcast to the entire stack.
+		for i, m := range a.stack {
+			updated, cmd := m.Update(msg)
+			a.stack[i] = updated
+			cmds = append(cmds, cmd)
+		}
+		return a, tea.Batch(cmds...)
+
+	case awspkg.RegionChangedMsg:
+		a.cfg = msg.Cfg
+		a.status.Region = msg.Region
+		a.status.Err = ""
+		a.status.Status = ""
 		// Broadcast to the entire stack.
 		for i, m := range a.stack {
 			updated, cmd := m.Update(msg)
@@ -190,6 +204,8 @@ func (a App) View() string {
 		body = a.helpOverlay.View(a.width, a.height-1)
 	} else if a.profilePicker != nil {
 		body = a.profilePicker.View(a.width, a.height-1)
+	} else if a.regionPicker != nil {
+		body = a.regionPicker.View(a.width, a.height-1)
 	} else if a.themePicker != nil {
 		body = a.themePicker.View(a.width, a.height-1)
 	}
@@ -208,7 +224,7 @@ func (a *App) setTop(m tea.Model) {
 func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Handle overlays first.
 	if a.helpOverlay != nil {
-		if msg.String() == "?" || msg.String() == "esc" || msg.String() == "q" {
+		if msg.String() == "?" || msg.String() == "esc" {
 			a.helpOverlay = nil
 		}
 		return a, nil
@@ -220,6 +236,15 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return a, cmd // cmd is either LoadProfileCmd or nil (cancel)
 		}
 		a.profilePicker = picker
+		return a, cmd
+	}
+	if a.regionPicker != nil {
+		picker, cmd, done := a.regionPicker.Update(msg)
+		if done {
+			a.regionPicker = nil
+			return a, cmd // cmd is either SwitchRegionCmd or nil (cancel)
+		}
+		a.regionPicker = picker
 		return a, cmd
 	}
 	if a.themePicker != nil {
@@ -247,7 +272,7 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// Global bindings.
 	switch msg.String() {
-	case "ctrl+c", "q":
+	case "ctrl+c":
 		return a, tea.Quit
 	case "?":
 		ho := NewHelpOverlay()
@@ -257,6 +282,10 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		pp, cmd := NewProfilePicker(a.status.Profile)
 		a.profilePicker = &pp
 		return a, cmd
+	case "R":
+		rp := NewRegionPicker(a.cfg, a.status.Region)
+		a.regionPicker = &rp
+		return a, nil
 	case "t":
 		tp := NewThemePicker()
 		a.themePicker = &tp

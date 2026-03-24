@@ -109,8 +109,17 @@ func startEditorCmd(cfg config.Config, initialJSON []byte) tea.Cmd {
 
 	// 3. Use tea.Exec with our draining wrapper instead of tea.ExecProcess so
 	//    we can flush stray terminal responses after the editor exits.
+	//
+	// #nosec G204 — not a shell-injection risk:
+	//   • editorBin is a bare binary name (e.g. "nvim") validated against the
+	//     hard-coded AllowedEditors allowlist; no user-supplied path or shell
+	//     metacharacter can reach this argument.
+	//   • tmpFile was constructed by us via os.MkdirTemp; it is never derived
+	//     from user input.
+	//   • exec.Command does not invoke a shell — arguments are passed directly
+	//     to execve(2), so there is no command-injection surface.
 	execCmd := &drainExecCommand{
-		cmd: exec.Command(editorBin, tmpFile), // #nosec G204 — binary validated above
+		cmd: exec.Command(editorBin, tmpFile),
 	}
 	return tea.Exec(execCmd, func(execErr error) tea.Msg {
 		defer os.RemoveAll(dir) // #nosec G defer — always clean up

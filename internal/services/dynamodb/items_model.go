@@ -63,6 +63,12 @@ type ItemsModel struct {
 	lastKey     map[string]ddbtypes.AttributeValue
 	hasMore     bool
 
+	// local (client-side) filter
+	localFilter    string
+	localFiltering bool                                 // true while the user is actively typing the filter
+	localFilterCol int                                  // column index to match against; -1 = all columns
+	filteredItems  []map[string]ddbtypes.AttributeValue // items matching localFilter
+
 	// display
 	table   table.Model
 	columns []string    // current column set
@@ -139,6 +145,11 @@ func (m ItemsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.reset()
 		return m, tea.Batch(m.spinner.Tick, m.freshFetchCmd())
 
+	case awspkg.RegionChangedMsg:
+		m.cfg = msg.Cfg
+		m.reset()
+		return m, tea.Batch(m.spinner.Tick, m.freshFetchCmd())
+
 	case spinner.TickMsg:
 		if m.loading {
 			sp, cmd := m.spinner.Update(msg)
@@ -201,12 +212,58 @@ func (m ItemsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m ItemsModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// While the local filter is active, all input goes to the filter field.
+	if m.localFiltering {
+		switch msg.String() {
+		case "esc":
+			m.localFiltering = false
+			m.localFilter = ""
+			m.rebuildTable()
+		case "enter":
+			// Confirm filter — exit typing mode but keep the filter active.
+			m.localFiltering = false
+		case "backspace":
+			if len(m.localFilter) > 0 {
+				m.localFilter = m.localFilter[:len(m.localFilter)-1]
+				m.rebuildTable()
+			}
+		case "tab":
+			// Cycle forward through columns: -1 (all) → 0 → 1 → … → n-1 → -1
+			if len(m.columns) > 0 {
+				m.localFilterCol = (m.localFilterCol+2)%(len(m.columns)+1) - 1
+				m.rebuildTable()
+			}
+		case "shift+tab":
+			// Cycle backward through columns.
+			if len(m.columns) > 0 {
+				n := len(m.columns)
+				m.localFilterCol = ((m.localFilterCol + 1 + n) % (n + 1)) - 1
+				m.rebuildTable()
+			}
+		default:
+			if len(msg.String()) == 1 {
+				m.localFilter += msg.String()
+				m.rebuildTable()
+			}
+		}
+		return m, nil
+	}
+
 	switch msg.String() {
 	case "r":
 		m.reset()
 		return m, tea.Batch(m.spinner.Tick, m.freshFetchCmd())
 
 	case "/":
+		// Start inline client-side filter. Default to first column (PK).
+		m.localFiltering = true
+		if len(m.columns) > 0 && m.localFilterCol < 0 {
+			m.localFilterCol = 0
+		}
+		return m, nil
+
+	case "F":
+		// Open DynamoDB FilterExpression prompt (server-side, advanced).
 		p := NewFilterPrompt()
 		m.activePrompt = &p
 		m.promptPurpose = purposeFilter
@@ -335,10 +392,17 @@ func (m ItemsModel) View() string {
 	header := m.headerView()
 	sep := ui.HorizontalSep(m.width)
 
-	hints := ui.RenderHints(m.width, [][2]string{
-		{"enter", "detail"}, {"e", "edit"}, {"n", "new"}, {"d", "delete"},
-		{"/", "filter"}, {"Q", "query"}, {"r", "refresh"}, {"←/→", "pages"},
-	})
+	var hints string
+	if m.localFiltering {
+		hints = ui.RenderHints(m.width, [][2]string{
+			{"esc", "cancel"}, {"enter", "confirm"}, {"tab", "change col"},
+		})
+	} else {
+		hints = ui.RenderHints(m.width, [][2]string{
+			{"enter", "detail"}, {"e", "edit"}, {"n", "new"}, {"d", "delete"},
+			{"/", "filter"}, {"F", "expr filter"}, {"Q", "query"}, {"r", "refresh"}, {"←/→", "pages"},
+		})
+	}
 
 	// Re-style every line emitted by the table widget (including the blank
 	// viewport-padding lines) to force the theme background colour.  Without
@@ -405,8 +469,21 @@ func (m ItemsModel) headerView() string {
 		modeBadge = ui.StyleModeBadgeScan.Render("scan")
 	}
 	if m.filterExpr != "" {
-		modeBadge += ui.StyleFilterLabel.Render("  filter: ") +
+		modeBadge += ui.StyleFilterLabel.Render("  expr: ") +
 			ui.StyleFilterValue.Render(m.filterExpr)
+	}
+	if m.localFiltering || m.localFilter != "" {
+		colName := "all"
+		if m.localFilterCol >= 0 && m.localFilterCol < len(m.columns) {
+			colName = m.columns[m.localFilterCol]
+		}
+		cursor := ""
+		if m.localFiltering {
+			cursor = "█"
+		}
+		modeBadge += ui.StyleFilterLabel.Render("  / ") +
+			ui.StyleFilterValue.Render(m.localFilter+cursor) +
+			ui.StyleMuted.Render("  ["+colName+"]")
 	}
 	page := fmt.Sprintf("page %d", m.currentPage+1)
 	if m.hasMore {
@@ -426,6 +503,9 @@ func (m *ItemsModel) reset() {
 	m.hasMore = false
 	m.loading = true
 	m.err = nil
+	m.localFilter = ""
+	m.localFiltering = false
+	// localFilterCol is intentionally preserved — user likely wants the same column next time.
 }
 
 func (m *ItemsModel) currentItems() []map[string]ddbtypes.AttributeValue {
@@ -436,7 +516,12 @@ func (m *ItemsModel) currentItems() []map[string]ddbtypes.AttributeValue {
 }
 
 func (m *ItemsModel) selectedRawItem() map[string]ddbtypes.AttributeValue {
-	items := m.currentItems()
+	// When a local filter is active, filteredItems is the visible subset; use
+	// that so the cursor index always points to the correct underlying DDB item.
+	items := m.filteredItems
+	if items == nil {
+		items = m.currentItems()
+	}
 	idx := m.table.Cursor()
 	if idx < 0 || idx >= len(items) {
 		return nil
@@ -516,7 +601,25 @@ func (m *ItemsModel) rebuildTable() {
 		}
 		raw[i] = row
 	}
-	m.rawRows = raw
+
+	// Apply the local (client-side) filter, keeping filteredItems in sync with rawRows
+	// so that selectedRawItem() always returns the correct underlying DDB item.
+	if m.localFilter == "" {
+		m.rawRows = raw
+		m.filteredItems = items
+	} else {
+		f := strings.ToLower(m.localFilter)
+		var filtRows []table.Row
+		var filtItems []map[string]ddbtypes.AttributeValue
+		for i, row := range raw {
+			if m.rowMatchesFilter(row, f) {
+				filtRows = append(filtRows, row)
+				filtItems = append(filtItems, items[i])
+			}
+		}
+		m.rawRows = filtRows
+		m.filteredItems = filtItems
+	}
 
 	m.table.SetRows(nil)
 	m.table.SetColumns(tCols)
@@ -564,8 +667,9 @@ func (m *ItemsModel) injectCursor() {
 }
 
 // IsTextInputActive implements ui.TextInputActive. Returns true while a prompt
-// overlay is open so that app.go does not intercept global shortcuts.
-func (m ItemsModel) IsTextInputActive() bool { return m.activePrompt != nil }
+// overlay is open or the user is typing a local filter, so that app.go does
+// not intercept global shortcuts.
+func (m ItemsModel) IsTextInputActive() bool { return m.activePrompt != nil || m.localFiltering }
 
 func colPriority(name string, ki tableKeyInfo) int {
 	switch name {
@@ -576,6 +680,24 @@ func colPriority(name string, ki tableKeyInfo) int {
 	default:
 		return 2
 	}
+}
+
+// rowMatchesFilter reports whether a table row matches the (already lowercased)
+// filter string f.  When localFilterCol < 0 every cell is checked; otherwise
+// only the cell at localFilterCol is checked.
+func (m *ItemsModel) rowMatchesFilter(row table.Row, f string) bool {
+	if m.localFilterCol < 0 {
+		for _, cell := range row {
+			if strings.Contains(strings.ToLower(cell), f) {
+				return true
+			}
+		}
+		return false
+	}
+	if m.localFilterCol < len(row) {
+		return strings.Contains(strings.ToLower(row[m.localFilterCol]), f)
+	}
+	return false
 }
 
 // marshalItemToJSON converts a raw DynamoDB item to pretty-printed JSON.

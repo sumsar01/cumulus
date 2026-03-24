@@ -1,31 +1,35 @@
-package dynamodb
+package cloudwatchlogs
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	awspkg "github.com/sumsar01/cumulus/internal/aws"
-	"github.com/sumsar01/cumulus/internal/config"
 	"github.com/sumsar01/cumulus/internal/ui"
 )
 
-// tablesLoadedMsg carries the result of a ListTables API call.
-type tablesLoadedMsg struct{ tables []string }
+// logGroupsLoadedMsg carries the result of a DescribeLogGroups API call.
+type logGroupsLoadedMsg struct{ groups []logGroup }
 
-// TablesModel lists all DynamoDB tables and lets the user select one.
-type TablesModel struct {
+// logGroup is a lightweight representation of a CloudWatch log group.
+type logGroup struct {
+	name          string
+	retentionDays int32 // 0 = never expire
+	storedBytes   int64
+	kmsKeyID      string
+}
+
+// LogGroupsModel lists all CloudWatch log groups and lets the user select one.
+type LogGroupsModel struct {
 	cfg       aws.Config
-	appCfg    config.Config
-	tables    []string
+	groups    []logGroup
 	cursor    int
 	filter    string
-	filtering bool // true when the user is actively typing a filter
+	filtering bool
 	spinner   spinner.Model
 	loading   bool
 	err       error
@@ -33,16 +37,18 @@ type TablesModel struct {
 	height    int
 }
 
-// NewTablesModel constructs the tables view.
-func NewTablesModel(cfg aws.Config, appCfg config.Config) TablesModel {
-	return TablesModel{cfg: cfg, appCfg: appCfg, spinner: ui.NewSpinner()}
+// NewLogGroupsModel constructs the log-groups view.
+func NewLogGroupsModel(cfg aws.Config) LogGroupsModel {
+	return LogGroupsModel{cfg: cfg, spinner: ui.NewSpinner()}
 }
 
-func (m TablesModel) Init() tea.Cmd {
-	return tea.Batch(m.spinner.Tick, fetchTablesCmd(m.cfg))
+// Init starts loading log groups immediately.
+func (m LogGroupsModel) Init() tea.Cmd {
+	return tea.Batch(m.spinner.Tick, fetchLogGroupsCmd(m.cfg))
 }
 
-func (m TablesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+// Update handles messages for the log-groups view.
+func (m LogGroupsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 
 	case tea.WindowSizeMsg:
@@ -53,25 +59,25 @@ func (m TablesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.cfg = msg.Cfg
 		m.loading = true
 		m.err = nil
-		m.tables = nil
+		m.groups = nil
 		m.cursor = 0
 		m.filter = ""
 		m.filtering = false
-		return m, tea.Batch(m.spinner.Tick, fetchTablesCmd(m.cfg))
+		return m, tea.Batch(m.spinner.Tick, fetchLogGroupsCmd(m.cfg))
 
 	case awspkg.RegionChangedMsg:
 		m.cfg = msg.Cfg
 		m.loading = true
 		m.err = nil
-		m.tables = nil
+		m.groups = nil
 		m.cursor = 0
 		m.filter = ""
 		m.filtering = false
-		return m, tea.Batch(m.spinner.Tick, fetchTablesCmd(m.cfg))
+		return m, tea.Batch(m.spinner.Tick, fetchLogGroupsCmd(m.cfg))
 
-	case tablesLoadedMsg:
+	case logGroupsLoadedMsg:
 		m.loading = false
-		m.tables = msg.tables
+		m.groups = msg.groups
 		m.cursor = 0
 		return m, nil
 
@@ -88,7 +94,6 @@ func (m TablesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.KeyMsg:
-		// While filtering, all input goes to the filter field.
 		if m.filtering {
 			switch msg.String() {
 			case "esc":
@@ -96,7 +101,6 @@ func (m TablesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.filter = ""
 				m.cursor = 0
 			case "enter":
-				// Confirm filter, exit filter-input mode but keep the filter active.
 				m.filtering = false
 			case "backspace":
 				if len(m.filter) > 0 {
@@ -112,18 +116,17 @@ func (m TablesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// Normal (non-filtering) keybindings.
 		switch msg.String() {
 		case "/":
 			m.filtering = true
 		case "r":
 			m.loading = true
 			m.err = nil
-			m.tables = nil
+			m.groups = nil
 			m.cursor = 0
 			m.filter = ""
 			m.filtering = false
-			return m, tea.Batch(m.spinner.Tick, fetchTablesCmd(m.cfg))
+			return m, tea.Batch(m.spinner.Tick, fetchLogGroupsCmd(m.cfg))
 		case "up", "k":
 			if m.cursor > 0 {
 				m.cursor--
@@ -143,13 +146,13 @@ func (m TablesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(vis) == 0 {
 				return m, nil
 			}
-			tableName := vis[m.cursor]
-			itemsModel := NewItemsModel(m.cfg, m.appCfg, tableName)
+			g := vis[m.cursor]
+			streamsModel := NewLogStreamsModel(m.cfg, g.name)
 			return m, tea.Batch(
-				itemsModel.Init(),
-				func() tea.Msg { return ui.PushMsg{Model: itemsModel} },
+				streamsModel.Init(),
+				func() tea.Msg { return ui.PushMsg{Model: streamsModel} },
 				func() tea.Msg {
-					return ui.SetBreadcrumbMsg{Crumbs: []string{"DynamoDB", tableName}}
+					return ui.SetBreadcrumbMsg{Crumbs: []string{"CloudWatch Logs", g.name}}
 				},
 			)
 		}
@@ -158,41 +161,29 @@ func (m TablesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// IsTextInputActive implements ui.TextInputActive. It returns true while the
-// user is typing a filter so that app.go passes all keys straight through
-// instead of intercepting global shortcuts.
-func (m TablesModel) IsTextInputActive() bool { return m.filtering }
+// IsTextInputActive implements ui.TextInputActive. Returns true while the user
+// is typing a filter so that app.go does not intercept global shortcuts.
+func (m LogGroupsModel) IsTextInputActive() bool { return m.filtering }
 
-// visible returns tables matching the current filter.
-func (m *TablesModel) visible() []string {
+// visible returns the log groups matching the current filter.
+func (m *LogGroupsModel) visible() []logGroup {
 	if m.filter == "" {
-		return m.tables
+		return m.groups
 	}
-	var out []string
 	f := strings.ToLower(m.filter)
-	for _, t := range m.tables {
-		if strings.Contains(strings.ToLower(t), f) {
-			out = append(out, t)
+	var out []logGroup
+	for _, g := range m.groups {
+		if strings.Contains(strings.ToLower(g.name), f) {
+			out = append(out, g)
 		}
 	}
 	return out
 }
 
-// isCredentialError returns true when err looks like an AWS credential failure.
-func isCredentialError(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "get credentials") ||
-		strings.Contains(msg, "no credentials") ||
-		strings.Contains(msg, "failed to refresh cached credentials") ||
-		strings.Contains(msg, "NoCredentialProviders")
-}
-
-func (m TablesModel) View() string {
+// View renders the log-groups list.
+func (m LogGroupsModel) View() string {
 	if m.loading {
-		content := fmt.Sprintf("%s  Loading tables…", m.spinner.View())
+		content := fmt.Sprintf("%s  Loading log groups…", m.spinner.View())
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content,
 			lipgloss.WithWhitespaceBackground(ui.ColorBg))
 	}
@@ -211,11 +202,11 @@ func (m TablesModel) View() string {
 	}
 
 	vis := m.visible()
-	total := len(m.tables)
+	total := len(m.groups)
 
-	// Header line — full terminal width.
-	title := ui.StyleTitle.Background(ui.ColorBg).Render("DynamoDB")
-	count := ui.StyleCount.Render(fmt.Sprintf("  %d / %d tables", len(vis), total))
+	// Header
+	title := ui.StyleTitle.Background(ui.ColorBg).Render("CloudWatch Logs")
+	count := ui.StyleCount.Render(fmt.Sprintf("  %d / %d groups", len(vis), total))
 	filterHint := ""
 	if m.filtering {
 		filterHint = "  " + ui.StyleKey.Background(ui.ColorBg).Render("/") +
@@ -227,16 +218,13 @@ func (m TablesModel) View() string {
 	}
 	header := ui.StyleItemsHeader.Width(m.width).Render(title + count + filterHint)
 
-	// Separator — full terminal width.
 	sep := ui.HorizontalSep(m.width)
 
-	// Table rows — each row at full terminal width.
 	maxRows := m.height - 4
 	if maxRows < 1 {
 		maxRows = 1
 	}
 
-	// Scroll window
 	start := 0
 	if m.cursor >= maxRows {
 		start = m.cursor - maxRows + 1
@@ -248,33 +236,38 @@ func (m TablesModel) View() string {
 
 	var rows strings.Builder
 	for i := start; i < end; i++ {
-		t := vis[i]
+		g := vis[i]
+		label := g.name
+		if g.retentionDays > 0 {
+			label += ui.StyleDimmed.Background(ui.ColorBg).Render(
+				fmt.Sprintf("  (%d days)", g.retentionDays),
+			)
+		}
 		if i == m.cursor {
 			hlSp := lipgloss.NewStyle().Background(ui.ColorHighlight).Render("  ")
 			row := ui.StyleListRowSelected.Width(m.width).Render(
 				hlSp +
 					ui.StyleListRowSelectedCursor.Render("›") +
 					hlSp +
-					ui.StyleListRowSelectedName.Render(t),
+					ui.StyleListRowSelectedName.Render(label),
 			)
 			rows.WriteString(row + "\n")
 		} else {
 			row := ui.StyleListRowNormal.Width(m.width).Render(
-				"     " + ui.StyleListRowNormalName.Render(t),
+				"     " + ui.StyleListRowNormalName.Render(label),
 			)
 			rows.WriteString(row + "\n")
 		}
 	}
 
 	if len(vis) == 0 && !m.filtering {
-		content := ui.StyleEmptyState.Render("no tables found")
+		content := ui.StyleEmptyState.Render("no log groups found")
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content,
 			lipgloss.WithWhitespaceBackground(ui.ColorBg))
 	} else if len(vis) == 0 {
-		rows.WriteString(ui.StyleEmptyState.PaddingLeft(5).Render("no tables found\n"))
+		rows.WriteString(ui.StyleEmptyState.PaddingLeft(5).Render("no log groups found\n"))
 	}
 
-	// Footer hints bar — full terminal width.
 	var pairs [][2]string
 	if m.filtering {
 		pairs = [][2]string{{"esc", "cancel filter"}, {"enter", "confirm"}}
@@ -283,8 +276,6 @@ func (m TablesModel) View() string {
 	}
 	hints := ui.RenderHints(m.width, pairs)
 
-	// Pad the row area so the hints bar is always pinned to the bottom.
-	// header(1) + sep(1) + hints(1) = 3 fixed lines; rest is for rows.
 	rowAreaHeight := m.height - 3
 	if rowAreaHeight < 1 {
 		rowAreaHeight = 1
@@ -297,29 +288,14 @@ func (m TablesModel) View() string {
 	return header + "\n" + sep + "\n" + rows.String() + hints
 }
 
-// fetchTablesCmd fetches all DynamoDB table names via paginated ListTables.
-func fetchTablesCmd(cfg aws.Config) tea.Cmd {
-	return func() tea.Msg {
-		client := dynamodb.NewFromConfig(cfg)
-		var tables []string
-		var lastEvaluated *string
-
-		for {
-			input := &dynamodb.ListTablesInput{}
-			if lastEvaluated != nil {
-				input.ExclusiveStartTableName = lastEvaluated
-			}
-			out, err := client.ListTables(context.Background(), input)
-			if err != nil {
-				return awspkg.ErrMsg{Err: fmt.Errorf("ListTables: %w", err)}
-			}
-			tables = append(tables, out.TableNames...)
-			if out.LastEvaluatedTableName == nil {
-				break
-			}
-			lastEvaluated = out.LastEvaluatedTableName
-		}
-
-		return tablesLoadedMsg{tables: tables}
+// isCredentialError reports whether err looks like an AWS credential failure.
+func isCredentialError(err error) bool {
+	if err == nil {
+		return false
 	}
+	msg := err.Error()
+	return strings.Contains(msg, "get credentials") ||
+		strings.Contains(msg, "no credentials") ||
+		strings.Contains(msg, "failed to refresh cached credentials") ||
+		strings.Contains(msg, "NoCredentialProviders")
 }

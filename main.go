@@ -18,7 +18,10 @@ import (
 	awspkg "github.com/sumsar01/cumulus/internal/aws"
 	"github.com/sumsar01/cumulus/internal/config"
 	"github.com/sumsar01/cumulus/internal/services"
+	"github.com/sumsar01/cumulus/internal/services/cloudwatchlogs"
 	"github.com/sumsar01/cumulus/internal/services/dynamodb"
+	"github.com/sumsar01/cumulus/internal/services/lambda"
+	"github.com/sumsar01/cumulus/internal/services/sqs"
 	"github.com/sumsar01/cumulus/internal/ui"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -73,6 +76,9 @@ func main() {
 	// ── Register services ─────────────────────────────────────────────────────
 	// To add a new service, Register it here. No other files need to change.
 	services.Register(dynamodb.Svc{AppCfg: appCfg})
+	services.Register(lambda.Svc{})
+	services.Register(cloudwatchlogs.Svc{})
+	services.Register(sqs.Svc{})
 
 	// ── Build root model ──────────────────────────────────────────────────────
 	navigator := ui.NewNavigator(awsCfg)

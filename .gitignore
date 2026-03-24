@@ -5,3 +5,41 @@
 
 # Compiled binaries
 cumulus
+
+# ── Accidental secrets / credentials ─────────────────────────────────────────
+# Environment variable files
+.env
+.env.*
+*.env
+
+# Private keys and certificates
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+*.der
+
+# AWS credential / config overrides (the real files live in ~/.aws, not here)
+credentials
+aws_credentials
+.aws/
+
+# Common secret-dump formats
+secrets.json
+secrets.yaml
+secrets.yml
+secrets.toml
+*_secrets.*
+*secret*
+*password*
+*passwd*
+*token*
+
+# SSH keys
+id_rsa
+id_ed25519
+id_ecdsa
+id_dsa
+*.ppk
