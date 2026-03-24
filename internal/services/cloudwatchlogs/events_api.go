@@ -49,41 +49,51 @@ func fetchLogGroupsCmd(cfg aws.Config) tea.Cmd {
 	}
 }
 
-// fetchLogStreamsCmd fetches log streams for a group, ordered by last-event time descending.
-func fetchLogStreamsCmd(cfg aws.Config, groupName string) tea.Cmd {
+// fetchLogStreamsCmd fetches log streams for a group.
+//
+// When prefix is empty, the first page (up to 50 streams) is returned ordered
+// by LastEventTime descending so the most-recently-active streams appear first.
+// Note: LastEventTime is eventually consistent and may lag up to ~1 hour, so
+// very recently created or active streams may not yet rank at the top.
+//
+// When prefix is non-empty, streams whose names begin with prefix are returned
+// ordered by LogStreamName (AWS does not allow LastEventTime ordering together
+// with a name prefix). Only the first page is fetched in either case.
+func fetchLogStreamsCmd(cfg aws.Config, groupName, prefix string) tea.Cmd {
 	return func() tea.Msg {
 		client := cloudwatchlogs.NewFromConfig(cfg)
 		ctx := context.Background()
 
-		var streams []logStream
-		var nextToken *string
-
-		for {
-			out, err := client.DescribeLogStreams(ctx, &cloudwatchlogs.DescribeLogStreamsInput{
-				LogGroupName: aws.String(groupName),
-				OrderBy:      cwltypes.OrderByLastEventTime,
-				Descending:   aws.Bool(true),
-				NextToken:    nextToken,
-			})
-			if err != nil {
-				return awspkg.ErrMsg{Err: fmt.Errorf("DescribeLogStreams %s: %w", groupName, err)}
-			}
-			for _, s := range out.LogStreams {
-				ls := logStream{
-					name: aws.ToString(s.LogStreamName),
-				}
-				if s.LastEventTimestamp != nil {
-					ls.lastEventTime = time.UnixMilli(*s.LastEventTimestamp)
-				}
-				streams = append(streams, ls)
-			}
-			if out.NextToken == nil {
-				break
-			}
-			nextToken = out.NextToken
+		input := &cloudwatchlogs.DescribeLogStreamsInput{
+			LogGroupName: aws.String(groupName),
+		}
+		if prefix != "" {
+			// LogStreamNamePrefix is incompatible with OrderBy:LastEventTime;
+			// omitting OrderBy defaults to LogStreamName ordering.
+			input.LogStreamNamePrefix = aws.String(prefix)
+		} else {
+			// Order by most-recently-active first (eventually consistent).
+			input.OrderBy = cwltypes.OrderByLastEventTime
+			input.Descending = aws.Bool(true)
 		}
 
-		return logStreamsLoadedMsg{streams: streams}
+		out, err := client.DescribeLogStreams(ctx, input)
+		if err != nil {
+			return awspkg.ErrMsg{Err: fmt.Errorf("DescribeLogStreams %s: %w", groupName, err)}
+		}
+
+		streams := make([]logStream, 0, len(out.LogStreams))
+		for _, s := range out.LogStreams {
+			ls := logStream{
+				name: aws.ToString(s.LogStreamName),
+			}
+			if s.LastEventTimestamp != nil {
+				ls.lastEventTime = time.UnixMilli(*s.LastEventTimestamp)
+			}
+			streams = append(streams, ls)
+		}
+
+		return logStreamsLoadedMsg{streams: streams, prefix: prefix}
 	}
 }
 
