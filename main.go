@@ -21,6 +21,7 @@ import (
 	"github.com/sumsar01/cumulus/internal/services/cloudwatchlogs"
 	"github.com/sumsar01/cumulus/internal/services/dynamodb"
 	"github.com/sumsar01/cumulus/internal/services/lambda"
+	"github.com/sumsar01/cumulus/internal/services/sqs"
 	"github.com/sumsar01/cumulus/internal/ui"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -77,6 +78,7 @@ func main() {
 	services.Register(dynamodb.Svc{AppCfg: appCfg})
 	services.Register(lambda.Svc{})
 	services.Register(cloudwatchlogs.Svc{})
+	services.Register(sqs.Svc{})
 
 	// ── Build root model ──────────────────────────────────────────────────────
 	navigator := ui.NewNavigator(awsCfg)
