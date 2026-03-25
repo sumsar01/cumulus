@@ -6,6 +6,9 @@
 # Compiled binaries
 cumulus
 
+# Rust build artifacts
+cumulus-rs/target/
+
 # ── Accidental secrets / credentials ─────────────────────────────────────────
 # Environment variable files
 .env
