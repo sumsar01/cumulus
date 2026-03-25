@@ -1,3 +1,4 @@
+use aws_types::SdkConfig;
 use crossterm::event::KeyEvent;
 
 /// Top-level actions that flow through the application.
@@ -15,7 +16,7 @@ pub enum Action {
     Quit,
     /// A raw keyboard event forwarded from crossterm.
     Key(KeyEvent),
-    /// Push a new view onto the stack (boxed so it is object-safe).
+    /// Push a new view onto the stack.
     Push(ViewKind),
     /// Pop the top view off the stack.
     Pop,
@@ -26,11 +27,17 @@ pub enum Action {
     /// Display a transient status message in the status bar.
     SetStatus(String),
     /// The AWS profile was changed — all views should reinitialise their clients.
-    ProfileChanged(String),
+    ProfileChanged {
+        cfg: SdkConfig,
+        profile: String,
+        region: String,
+    },
     /// The AWS region was changed — all views should reinitialise their clients.
-    RegionChanged(String),
+    RegionChanged { cfg: SdkConfig, region: String },
     /// The colour theme was changed.
     ThemeChanged(String),
+    /// An AWS SDK or I/O error to surface in the status bar.
+    AwsError(String),
 }
 
 /// Discriminator used with `Action::Push` to identify which view to construct.

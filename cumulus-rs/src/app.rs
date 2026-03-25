@@ -1,3 +1,4 @@
+use aws_types::SdkConfig;
 use crossterm::event::KeyCode;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -50,6 +51,8 @@ pub struct App {
     stack: Vec<Box<dyn View>>,
     /// Current colour theme.
     theme: Theme,
+    /// Active AWS SDK config (used when propagating profile/region changes).
+    sdk_cfg: Option<SdkConfig>,
     /// Active AWS profile name (shown in status bar).
     profile: String,
     /// Active AWS region (shown in status bar).
@@ -70,6 +73,7 @@ impl App {
         Self {
             stack: Vec::new(),
             theme: Theme::from_name("tokyonight"),
+            sdk_cfg: None,
             profile: "default".to_string(),
             region: "us-east-1".to_string(),
             breadcrumbs: Vec::new(),
@@ -100,14 +104,9 @@ impl App {
             view.draw(frame, content_area, &self.theme);
         } else {
             // Home screen placeholder until Navigator is implemented
-            let inner = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-                .split(content_area);
-            // Just show a blank themed background
             frame.render_widget(
                 Block::default().style(self.theme.background_style()),
-                inner[0],
+                content_area,
             );
         }
 
@@ -198,21 +197,37 @@ impl App {
                 self.status = Some(msg);
                 self.error = None;
             }
-            Action::ProfileChanged(profile) => {
+            Action::ProfileChanged {
+                ref cfg,
+                ref profile,
+                ref region,
+            } => {
+                self.sdk_cfg = Some(cfg.clone());
                 self.profile = profile.clone();
+                self.region = region.clone();
+                self.error = None;
                 // Propagate to all views on the stack.
                 for view in &mut self.stack {
-                    view.handle_action(&Action::ProfileChanged(profile.clone()), tx);
+                    view.handle_action(&action, tx);
                 }
             }
-            Action::RegionChanged(region) => {
+            Action::RegionChanged {
+                ref cfg,
+                ref region,
+            } => {
+                self.sdk_cfg = Some(cfg.clone());
                 self.region = region.clone();
+                self.error = None;
                 for view in &mut self.stack {
-                    view.handle_action(&Action::RegionChanged(region.clone()), tx);
+                    view.handle_action(&action, tx);
                 }
             }
             Action::ThemeChanged(name) => {
                 self.theme = Theme::from_name(&name);
+            }
+            Action::AwsError(msg) => {
+                self.error = Some(msg);
+                self.status = None;
             }
         }
     }
