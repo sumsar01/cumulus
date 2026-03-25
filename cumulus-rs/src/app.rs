@@ -1,5 +1,5 @@
 use aws_types::SdkConfig;
-use crossterm::event::KeyCode;
+use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     widgets::Block,
@@ -8,8 +8,15 @@ use ratatui::{
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::{
-    action::{Action, ViewKind},
-    ui::{statusbar, styles::Theme},
+    action::Action,
+    services::navigator::Navigator,
+    ui::{
+        overlays::{
+            HelpOverlay, Overlay, OverlayOutcome, ProfilePicker, RegionPicker, ThemePicker,
+        },
+        statusbar,
+        styles::Theme,
+    },
 };
 
 /// Height (in rows) reserved for the status bar at the bottom of the screen.
@@ -49,9 +56,13 @@ pub trait View: Send {
 pub struct App {
     /// View stack — the last element is the currently active view.
     stack: Vec<Box<dyn View>>,
+    /// At most one overlay is open at a time.
+    overlay: Option<Overlay>,
     /// Current colour theme.
     theme: Theme,
-    /// Active AWS SDK config (used when propagating profile/region changes).
+    /// Machine name of current theme (for ThemePicker pre-selection and restore).
+    theme_name: String,
+    /// Active AWS SDK config.
     sdk_cfg: Option<SdkConfig>,
     /// Active AWS profile name (shown in status bar).
     profile: String,
@@ -68,14 +79,24 @@ pub struct App {
 }
 
 impl App {
-    /// Create a new `App` with default state.
-    pub fn new() -> Self {
+    /// Create a new `App`, pushing an initial `Navigator` view onto the stack.
+    pub fn new(cfg: SdkConfig, profile: String) -> Self {
+        let region = cfg
+            .region()
+            .map(|r| r.as_ref().to_string())
+            .unwrap_or_else(|| "us-east-1".to_string());
+
+        let nav: Box<dyn View> = Box::new(Navigator::new(cfg.clone()));
+        let theme_name = "tokyonight".to_string();
+
         Self {
-            stack: Vec::new(),
-            theme: Theme::from_name("tokyonight"),
-            sdk_cfg: None,
-            profile: "default".to_string(),
-            region: "us-east-1".to_string(),
+            stack: vec![nav],
+            overlay: None,
+            theme: Theme::from_name(&theme_name),
+            theme_name,
+            sdk_cfg: Some(cfg),
+            profile,
+            region,
             breadcrumbs: Vec::new(),
             error: None,
             status: None,
@@ -83,7 +104,7 @@ impl App {
         }
     }
 
-    /// Draw the entire screen: active view + status bar.
+    /// Draw the entire screen: active view + optional overlay + status bar.
     pub fn draw(&self, frame: &mut Frame) {
         let size = frame.area();
 
@@ -99,18 +120,22 @@ impl App {
         let content_area = chunks[0];
         let status_area = chunks[1];
 
-        // Draw active view (if any)
+        // Draw active view (if any).
         if let Some(view) = self.stack.last() {
             view.draw(frame, content_area, &self.theme);
         } else {
-            // Home screen placeholder until Navigator is implemented
             frame.render_widget(
                 Block::default().style(self.theme.background_style()),
                 content_area,
             );
         }
 
-        // Draw status bar
+        // Draw overlay on top (priority: help > profile > region > theme).
+        if let Some(overlay) = &self.overlay {
+            overlay.draw(frame, content_area, &self.theme);
+        }
+
+        // Draw status bar.
         statusbar::draw(
             frame,
             status_area,
@@ -123,8 +148,7 @@ impl App {
         );
     }
 
-    /// Dispatch an action, returning any chained action that should also be
-    /// dispatched (callers should loop until `None`).
+    /// Dispatch an action, recursively handling any chained action.
     pub fn handle_action(&mut self, action: Action, tx: &UnboundedSender<Action>) {
         match action {
             Action::Quit => {
@@ -142,29 +166,87 @@ impl App {
                 }
             }
             Action::Key(key) => {
-                // Global ctrl+c / q quit handler (when no text input is active).
+                // ── Overlay gets first priority ──────────────────────────────
+                if self.overlay.is_some() {
+                    let outcome = self.overlay.as_mut().unwrap().handle_key(key, tx);
+                    match outcome {
+                        OverlayOutcome::Open(Some(a)) => self.handle_action(a, tx),
+                        OverlayOutcome::Open(None) => {}
+                        OverlayOutcome::Close(Some(a)) => {
+                            self.overlay = None;
+                            self.handle_action(a, tx);
+                        }
+                        OverlayOutcome::Close(None) => {
+                            self.overlay = None;
+                        }
+                    }
+                    return;
+                }
+
+                // ── Text-input bypass ────────────────────────────────────────
                 let text_active = self
                     .stack
                     .last()
                     .map(|v| v.is_text_input_active())
                     .unwrap_or(false);
 
-                if !text_active {
-                    match key.code {
-                        KeyCode::Char('q') | KeyCode::Char('Q') => {
-                            self.should_quit = true;
-                            return;
-                        }
-                        KeyCode::Char('c')
-                            if key
-                                .modifiers
-                                .contains(crossterm::event::KeyModifiers::CONTROL) =>
-                        {
-                            self.should_quit = true;
-                            return;
-                        }
-                        _ => {}
+                if text_active {
+                    // Only ctrl+c can interrupt text input.
+                    if key.code == KeyCode::Char('c')
+                        && key.modifiers.contains(KeyModifiers::CONTROL)
+                    {
+                        self.should_quit = true;
+                        return;
                     }
+                    if let Some(view) = self.stack.last_mut() {
+                        if let Some(a) = view.handle_key(key, tx) {
+                            self.handle_action(a, tx);
+                        }
+                    }
+                    return;
+                }
+
+                // ── Global shortcuts ─────────────────────────────────────────
+                match key.code {
+                    KeyCode::Char('q') | KeyCode::Char('Q') => {
+                        self.should_quit = true;
+                        return;
+                    }
+                    KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        self.should_quit = true;
+                        return;
+                    }
+                    KeyCode::Char('?') => {
+                        self.overlay = Some(Overlay::Help(HelpOverlay::new()));
+                        return;
+                    }
+                    KeyCode::Char('p') => {
+                        let profile = self.profile.clone();
+                        self.overlay =
+                            Some(Overlay::Profile(ProfilePicker::new(&profile, tx.clone())));
+                        return;
+                    }
+                    KeyCode::Char('R') => {
+                        let region = self.region.clone();
+                        let profile = self.profile.clone();
+                        self.overlay = Some(Overlay::Region(RegionPicker::new(&region, &profile)));
+                        return;
+                    }
+                    KeyCode::Char('t') => {
+                        let theme_name = self.theme_name.clone();
+                        self.overlay = Some(Overlay::Theme(ThemePicker::new(&theme_name)));
+                        return;
+                    }
+                    KeyCode::Esc => {
+                        if self.stack.len() > 1 {
+                            self.stack.pop();
+                            if self.stack.len() == 1 {
+                                self.breadcrumbs.clear();
+                            }
+                        }
+                        return;
+                    }
+                    _ => {}
                 }
 
                 // Forward to the active view.
@@ -174,16 +256,15 @@ impl App {
                     }
                 }
             }
-            Action::Push(kind) => {
-                match kind {
-                    ViewKind::Navigator => {
-                        // Navigator will be implemented in Phase 3.
-                    }
-                }
+            Action::PushView(view) => {
+                self.stack.push(view);
             }
             Action::Pop => {
                 if self.stack.len() > 1 {
                     self.stack.pop();
+                    if self.stack.len() == 1 {
+                        self.breadcrumbs.clear();
+                    }
                 }
             }
             Action::SetBreadcrumb(crumbs) => {
@@ -206,6 +287,7 @@ impl App {
                 self.profile = profile.clone();
                 self.region = region.clone();
                 self.error = None;
+                self.status = None;
                 // Propagate to all views on the stack.
                 for view in &mut self.stack {
                     view.handle_action(&action, tx);
@@ -222,12 +304,19 @@ impl App {
                     view.handle_action(&action, tx);
                 }
             }
-            Action::ThemeChanged(name) => {
-                self.theme = Theme::from_name(&name);
+            Action::ThemeChanged(ref name) => {
+                self.theme = Theme::from_name(name);
+                self.theme_name = name.clone();
             }
             Action::AwsError(msg) => {
                 self.error = Some(msg);
                 self.status = None;
+            }
+            Action::ProfilesLoaded(_) => {
+                // Forward to the profile picker overlay if it is open.
+                if let Some(overlay) = &mut self.overlay {
+                    overlay.handle_action(&action, tx);
+                }
             }
         }
     }

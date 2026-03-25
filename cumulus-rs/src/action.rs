@@ -1,12 +1,13 @@
 use aws_types::SdkConfig;
 use crossterm::event::KeyEvent;
 
+use crate::app::View;
+
 /// Top-level actions that flow through the application.
 ///
 /// Produced by the event loop (keyboard / terminal resize / tick) or by
 /// async AWS background tasks, and consumed by `App::handle_action` which
 /// dispatches them to the active view on the stack.
-#[derive(Debug, Clone)]
 pub enum Action {
     /// A single terminal tick — used to drive spinner animation.
     Tick,
@@ -16,8 +17,8 @@ pub enum Action {
     Quit,
     /// A raw keyboard event forwarded from crossterm.
     Key(KeyEvent),
-    /// Push a new view onto the stack.
-    Push(ViewKind),
+    /// Push a boxed view onto the stack directly.
+    PushView(Box<dyn View>),
     /// Pop the top view off the stack.
     Pop,
     /// Update the breadcrumb trail shown in the status bar.
@@ -38,13 +39,6 @@ pub enum Action {
     ThemeChanged(String),
     /// An AWS SDK or I/O error to surface in the status bar.
     AwsError(String),
-}
-
-/// Discriminator used with `Action::Push` to identify which view to construct.
-///
-/// Carrying a plain enum (rather than a `Box<dyn View>`) keeps `Action`
-/// easily clonable and avoids object-safety complications in message passing.
-#[derive(Debug, Clone)]
-pub enum ViewKind {
-    Navigator,
+    /// Async result of listing AWS profiles (sent to the profile picker overlay).
+    ProfilesLoaded(Vec<String>),
 }
