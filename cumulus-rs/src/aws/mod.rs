@@ -11,7 +11,7 @@
 use std::{env, fs, path::PathBuf, time::Duration};
 
 use anyhow::{Context, Result};
-use aws_config::{meta::region::RegionProviderChain, timeout::TimeoutConfig, BehaviorVersion};
+use aws_config::{meta::region::RegionProviderChain, profile::ProfileFileRegionProvider, timeout::TimeoutConfig, BehaviorVersion};
 use aws_types::region::Region;
 use aws_types::SdkConfig;
 use tokio::sync::mpsc::UnboundedSender;
@@ -22,9 +22,11 @@ use crate::action::Action;
 
 /// Build a TimeoutConfig that makes IMDS probe fail quickly.
 /// cumulus is a local developer tool — IMDS is unreachable outside EC2.
+/// 3 s connect timeout is generous enough for SSO token refresh over the
+/// public internet while still aborting quickly if IMDS is probed.
 fn fast_timeout() -> TimeoutConfig {
     TimeoutConfig::builder()
-        .connect_timeout(Duration::from_millis(200))
+        .connect_timeout(Duration::from_secs(3))
         .build()
 }
 
@@ -46,14 +48,25 @@ pub async fn load_default() -> Result<SdkConfig> {
 }
 
 /// Initialise an `SdkConfig` for the named profile.
+///
+/// Region priority: named profile's config file entry → env var → "us-east-1".
+/// This ensures that profiles with an explicit `region =` field (e.g. SSO
+/// profiles) use their own region rather than inheriting from env vars.
 pub async fn load_profile(profile: &str) -> Result<SdkConfig> {
     let fallback_region = region_from_env().unwrap_or_else(|| "us-east-1".to_string());
+    // ProfileFileRegionProvider reads the `region` field from the named
+    // [profile <name>] section, which RegionProviderChain::default_provider()
+    // does not do.
+    let region_provider = RegionProviderChain::first_try(
+        ProfileFileRegionProvider::builder()
+            .profile_name(profile)
+            .build(),
+    )
+    .or_else(Region::new(fallback_region));
+
     let cfg = aws_config::defaults(BehaviorVersion::latest())
         .profile_name(profile)
-        .region(
-            RegionProviderChain::default_provider()
-                .or_else(Region::new(fallback_region)),
-        )
+        .region(region_provider)
         .timeout_config(fast_timeout())
         .load()
         .await;
