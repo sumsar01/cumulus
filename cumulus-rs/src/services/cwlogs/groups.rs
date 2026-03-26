@@ -9,7 +9,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Cell, Row, Table, TableState},
+    widgets::{Block, BorderType, Cell, Padding, Row, Table, TableState},
     Frame,
 };
 use tokio::sync::mpsc::UnboundedSender;
@@ -233,21 +233,9 @@ impl View for GroupsView {
             return;
         }
 
-        // ── Layout: header(1) + sep(1) + col_header(1) + table(min) + hints(1) ─
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(1), // header
-                Constraint::Length(1), // sep
-                Constraint::Length(1), // col header
-                Constraint::Min(0),    // table
-                Constraint::Length(1), // hints
-            ])
-            .split(area);
-
         let vis = self.visible();
 
-        // ── Header ────────────────────────────────────────────────────────────
+        // ── Title spans ───────────────────────────────────────────────────────
         let filter_span = if self.filtering {
             Span::styled(
                 format!("  / {}\u{2588}", self.filter),
@@ -258,7 +246,7 @@ impl View for GroupsView {
         } else {
             Span::raw("")
         };
-        let header_line = Line::from(vec![
+        let title_line = Line::from(vec![
             Span::styled("CloudWatch Logs", theme.text_accent_style()),
             Span::styled(
                 format!("  {} / {} groups", vis.len(), self.groups.len()),
@@ -266,48 +254,6 @@ impl View for GroupsView {
             ),
             filter_span,
         ]);
-        frame.render_widget(
-            ratatui::widgets::Paragraph::new(header_line).style(theme.background_style()),
-            chunks[0],
-        );
-
-        // ── Separator ─────────────────────────────────────────────────────────
-        let sep_str = "\u{2500}".repeat(area.width as usize);
-        frame.render_widget(
-            ratatui::widgets::Paragraph::new(sep_str).style(theme.border_dim_style()),
-            chunks[1],
-        );
-
-        // ── Column header ─────────────────────────────────────────────────────
-        let col_hdr = Line::from(vec![Span::styled("  NAME", theme.text_dim_style())]);
-        frame.render_widget(
-            ratatui::widgets::Paragraph::new(col_hdr).style(theme.background_style()),
-            chunks[2],
-        );
-
-        // ── Table rows ────────────────────────────────────────────────────────
-        let rows: Vec<Row> = vis
-            .iter()
-            .map(|g| {
-                let retention = Self::retention_label(g.retention_days);
-                Row::new(vec![Cell::from(format!("  {}  {}", g.name, retention))])
-                    .style(theme.text_style())
-            })
-            .collect();
-
-        let widths = [Constraint::Min(area.width)];
-
-        let table = Table::new(rows, widths)
-            .block(Block::default().style(theme.background_style()))
-            .row_highlight_style(
-                Style::default()
-                    .bg(theme.selection_bg)
-                    .add_modifier(Modifier::BOLD),
-            )
-            .highlight_symbol("› ");
-
-        let mut ts = self.table_state.clone();
-        frame.render_stateful_widget(table, chunks[3], &mut ts);
 
         // ── Hints ─────────────────────────────────────────────────────────────
         let pairs: Vec<(&str, &str)> = if self.filtering {
@@ -321,9 +267,54 @@ impl View for GroupsView {
             ]
         };
         let hints_line = render_hints(&pairs, theme);
+
+        // ── Bordered panel ────────────────────────────────────────────────────
+        let block = Block::bordered()
+            .border_type(BorderType::Rounded)
+            .border_style(theme.border_style())
+            .title(title_line)
+            .title_bottom(hints_line)
+            .style(theme.background_style())
+            .padding(Padding::horizontal(1));
+
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
+        // ── Inner layout: col_header(1) + table(min) ─────────────────────────
+        let inner_chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(1), Constraint::Min(0)])
+            .split(inner);
+
+        // ── Column header ─────────────────────────────────────────────────────
+        let col_hdr = Line::from(vec![Span::styled("NAME", theme.text_dim_style())]);
         frame.render_widget(
-            ratatui::widgets::Paragraph::new(hints_line).style(theme.background_style()),
-            chunks[4],
+            ratatui::widgets::Paragraph::new(col_hdr).style(theme.background_style()),
+            inner_chunks[0],
         );
+
+        // ── Table rows ────────────────────────────────────────────────────────
+        let rows: Vec<Row> = vis
+            .iter()
+            .map(|g| {
+                let retention = Self::retention_label(g.retention_days);
+                Row::new(vec![Cell::from(format!("{}  {}", g.name, retention))])
+                    .style(theme.text_style())
+            })
+            .collect();
+
+        let widths = [Constraint::Min(inner.width)];
+
+        let table = Table::new(rows, widths)
+            .block(Block::default().style(theme.background_style()))
+            .row_highlight_style(
+                Style::default()
+                    .bg(theme.selection_bg)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .highlight_symbol("› ");
+
+        let mut ts = self.table_state.clone();
+        frame.render_stateful_widget(table, inner_chunks[1], &mut ts);
     }
 }

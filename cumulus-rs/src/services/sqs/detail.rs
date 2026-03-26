@@ -7,9 +7,9 @@
 use aws_sdk_sqs::types::Message;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::Rect,
     text::{Line, Span},
-    widgets::Paragraph,
+    widgets::{Block, BorderType, Padding, Paragraph},
     Frame,
 };
 use tokio::sync::mpsc::UnboundedSender;
@@ -19,7 +19,7 @@ use crate::{
     app::View,
     services::sqs::messages::truncate_str,
     ui::{
-        helpers::{horizontal_sep, render_hints},
+        helpers::render_hints,
         styles::Theme,
     },
 };
@@ -93,37 +93,41 @@ impl View for MessageDetailView {
     }
 
     fn draw(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
-        // ── Layout: title(1) + sep(1) + content(min) + hints(1) ──────────────
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(1), // title
-                Constraint::Length(1), // sep
-                Constraint::Min(0),    // content
-                Constraint::Length(1), // hints
-            ])
-            .split(area);
-
-        let viewport_h = chunks[2].height as usize;
-        let max_scroll = self.max_scroll(viewport_h);
-        let eff_scroll = self.scroll.min(max_scroll);
-        let pct = self.scroll_percent(viewport_h);
-
-        // ── Title ─────────────────────────────────────────────────────────────
+        // ── Bordered panel ────────────────────────────────────────────────────
         let msg_id = truncate_str(self.message.message_id().unwrap_or(""), 36);
         let title_line = Line::from(vec![
             Span::styled(self.queue_name.clone(), theme.text_accent_style()),
             Span::styled(format!("  — {msg_id}"), theme.text_dim_style()),
         ]);
-        frame.render_widget(
-            Paragraph::new(title_line).style(theme.background_style()),
-            chunks[0],
-        );
 
-        // ── Separator ─────────────────────────────────────────────────────────
-        horizontal_sep(frame, chunks[1], theme);
+        let viewport_h = area.height.saturating_sub(2) as usize;
+        let pct = self.scroll_percent(viewport_h);
+
+        let pairs: Vec<(&str, &str)> =
+            vec![("↑/↓", "scroll"), ("y", "copy body"), ("esc", "back")];
+        let scroll_label = format!("{pct}%");
+        let mut hint_spans: Vec<Span> = render_hints(&pairs, theme).spans;
+        hint_spans.push(Span::styled(
+            format!("   {scroll_label}"),
+            theme.text_dim_style(),
+        ));
+
+        let block = Block::bordered()
+            .border_type(BorderType::Rounded)
+            .border_style(theme.border_style())
+            .title(title_line)
+            .title_bottom(Line::from(hint_spans))
+            .style(theme.background_style())
+            .padding(Padding::horizontal(1));
+
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
 
         // ── Content viewport ──────────────────────────────────────────────────
+        let viewport_h = inner.height as usize;
+        let max_scroll = self.max_scroll(viewport_h);
+        let eff_scroll = self.scroll.min(max_scroll);
+
         let visible: Vec<Line> = self
             .body_lines
             .iter()
@@ -134,21 +138,7 @@ impl View for MessageDetailView {
 
         frame.render_widget(
             Paragraph::new(visible).style(theme.background_style()),
-            chunks[2],
-        );
-
-        // ── Hints ─────────────────────────────────────────────────────────────
-        let pairs: Vec<(&str, &str)> =
-            vec![("↑/↓", "scroll"), ("y", "copy body"), ("esc", "back")];
-        let scroll_label = format!("{pct}%");
-        let mut hint_spans: Vec<Span> = render_hints(&pairs, theme).spans;
-        hint_spans.push(Span::styled(
-            format!("   {scroll_label}"),
-            theme.text_dim_style(),
-        ));
-        frame.render_widget(
-            Paragraph::new(Line::from(hint_spans)).style(theme.background_style()),
-            chunks[3],
+            inner,
         );
     }
 }
