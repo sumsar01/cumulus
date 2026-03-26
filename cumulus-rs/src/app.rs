@@ -9,6 +9,8 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::{
     action::Action,
+    aws::is_credential_error,
+    config,
     services::navigator::Navigator,
     ui::{
         overlays::{
@@ -80,14 +82,21 @@ pub struct App {
 
 impl App {
     /// Create a new `App`, pushing an initial `Navigator` view onto the stack.
-    pub fn new(cfg: SdkConfig, profile: String) -> Self {
+    ///
+    /// `theme_name` is the persisted theme from config (e.g. `"tokyonight"`).
+    /// Pass an empty string to fall back to the built-in default.
+    pub fn new(cfg: SdkConfig, profile: String, theme_name: String) -> Self {
         let region = cfg
             .region()
             .map(|r| r.as_ref().to_string())
             .unwrap_or_else(|| "us-east-1".to_string());
 
         let nav: Box<dyn View> = Box::new(Navigator::new(cfg.clone()));
-        let theme_name = "tokyonight".to_string();
+        let theme_name = if theme_name.is_empty() {
+            "tokyonight".to_string()
+        } else {
+            theme_name
+        };
 
         Self {
             stack: vec![nav],
@@ -288,6 +297,10 @@ impl App {
                 self.region = region.clone();
                 self.error = None;
                 self.status = None;
+                // Persist the newly selected profile.
+                let mut saved = config::load().unwrap_or_default();
+                saved.last_profile = profile.clone();
+                let _ = config::save(&saved);
                 // Propagate to all views on the stack.
                 for view in &mut self.stack {
                     view.handle_action(&action, tx);
@@ -307,9 +320,18 @@ impl App {
             Action::ThemeChanged(ref name) => {
                 self.theme = Theme::from_name(name);
                 self.theme_name = name.clone();
+                // Persist the newly selected theme.
+                let mut saved = config::load().unwrap_or_default();
+                saved.theme = name.clone();
+                let _ = config::save(&saved);
             }
             Action::AwsError(msg) => {
-                self.error = Some(msg);
+                let display = if is_credential_error(&msg) {
+                    format!("{msg} — try: aws sso login  or  aws configure")
+                } else {
+                    msg
+                };
+                self.error = Some(display);
                 self.status = None;
             }
             Action::ProfilesLoaded(_) => {

@@ -8,7 +8,7 @@ mod ui;
 
 use anyhow::Result;
 
-use crate::{app::App, aws::load_default, event::Tui, services::register};
+use crate::{app::App, aws::{load_default, load_profile}, event::Tui, services::register};
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
@@ -34,18 +34,38 @@ async fn main() -> Result<()> {
     register(services::sqs::SqsService);
     register(services::cwlogs::CwlService);
 
-    // Load AWS config (default profile / env vars).
-    let cfg = load_default().await?;
+    // Load persisted user config (theme, last_profile, editor).
+    // Errors are non-fatal: fall back to defaults so a corrupt config file
+    // never prevents the user from launching the app.
+    let saved_cfg = config::load().unwrap_or_default();
 
-    // Determine active profile name from environment or fall back to "default".
+    // Determine active profile: env var > persisted last_profile > "default".
     let profile = std::env::var("AWS_PROFILE")
         .or_else(|_| std::env::var("AWS_DEFAULT_PROFILE"))
-        .unwrap_or_else(|_| "default".to_string());
+        .unwrap_or_else(|_| {
+            if saved_cfg.last_profile.is_empty() {
+                "default".to_string()
+            } else {
+                saved_cfg.last_profile.clone()
+            }
+        });
+
+    // Load AWS config for the chosen profile.
+    // If the saved profile fails (e.g. it was deleted), fall back to the
+    // default credential chain so the app still starts.
+    let cfg = if profile == "default" {
+        load_default().await?
+    } else {
+        match load_profile(&profile).await {
+            Ok(c) => c,
+            Err(_) => load_default().await?,
+        }
+    };
 
     let mut tui = Tui::new()?;
     tui.enter()?;
 
-    let mut app = App::new(cfg, profile);
+    let mut app = App::new(cfg, profile, saved_cfg.theme);
     let tx = tui.sender();
 
     loop {

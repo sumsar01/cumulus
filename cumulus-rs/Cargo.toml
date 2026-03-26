@@ -33,4 +33,8 @@ base64 = "0.22"
 unicode-width = "0.2"
 tempfile = "3"
 
+[profile.release]
+opt-level = 3
+strip = "symbols"
+
 [dev-dependencies]
