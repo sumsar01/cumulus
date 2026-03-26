@@ -31,11 +31,7 @@ use crate::{
         prompt::{Prompt, PromptOutcome},
         DdbAction,
     },
-    ui::{
-        helpers::{center_rect, render_hints, MAX_CONTENT_WIDTH},
-        spinner::Spinner,
-        styles::Theme,
-    },
+    ui::{helpers::render_hints, spinner::Spinner, styles::Theme},
 };
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -543,7 +539,8 @@ impl View for ItemsView {
     }
 
     fn draw(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
-        let area = center_rect(area, MAX_CONTENT_WIDTH, area.height);
+        // Use the full terminal width so wide tables with many columns have room
+        // to breathe.  Other views (tables list, detail) still use MAX_CONTENT_WIDTH.
         // ── Loading ───────────────────────────────────────────────────────────
         if self.loading {
             let msg = format!("{}  Loading items…", self.spinner.symbol());
@@ -694,20 +691,76 @@ impl ItemsView {
                 table_area,
             );
         } else {
-            // Compute column widths — divide evenly.
-            let n = self.columns.len();
-            let available = table_w.saturating_sub(n * 2); // 1 char padding each side
-            let col_w = (available / n).max(4);
-            let remainder = available.saturating_sub(col_w * n);
+            // Compute column widths — content-aware sizing.
+            //
+            // For each column measure the header width and the widest visible
+            // cell value, clamp to [MIN_COL, MAX_COL], then fit everything into
+            // `available`.  When the natural total exceeds `available` we scale
+            // down proportionally (floor at MIN_COL) and distribute any leftover
+            // space to the first columns one character at a time.
+            const MIN_COL: usize = 4;
+            const MAX_COL: usize = 30;
 
-            let constraints: Vec<Constraint> = self
+            let n = self.columns.len();
+            // 1 char ratatui padding on each side of every cell = n * 2 overhead.
+            let available = table_w.saturating_sub(n * 2);
+
+            // Natural width = max(header len, widest cell value), clamped.
+            let nat: Vec<usize> = self
                 .columns
                 .iter()
-                .enumerate()
-                .map(|(i, _)| {
-                    let w = col_w + if i < remainder { 1 } else { 0 };
-                    Constraint::Length(w as u16)
+                .map(|col| {
+                    let hdr_w = col.len();
+                    let max_val_w = self
+                        .filtered_items
+                        .iter()
+                        .map(|item| {
+                            item.get(col)
+                                .map(attr_value_string)
+                                .unwrap_or_else(|| "—".to_string())
+                                .len()
+                        })
+                        .max()
+                        .unwrap_or(0);
+                    hdr_w.max(max_val_w).clamp(MIN_COL, MAX_COL)
                 })
+                .collect();
+
+            let total_nat: usize = nat.iter().sum();
+
+            let widths: Vec<usize> = if total_nat <= available {
+                // Columns fit naturally — use measured widths as-is.
+                nat
+            } else {
+                // Scale down proportionally, floor at MIN_COL.
+                let mut scaled: Vec<usize> = nat
+                    .iter()
+                    .map(|&w| ((w * available) / total_nat).max(MIN_COL))
+                    .collect();
+
+                // Distribute any remaining space (due to floor) one char at a
+                // time to the widest columns first.
+                let used: usize = scaled.iter().sum();
+                let mut spare = available.saturating_sub(used);
+                if spare > 0 {
+                    // Sort indices by natural width descending so wider columns
+                    // get priority.
+                    let mut order: Vec<usize> = (0..n).collect();
+                    order.sort_by(|&a, &b| nat[b].cmp(&nat[a]));
+                    for idx in order {
+                        if spare == 0 {
+                            break;
+                        }
+                        scaled[idx] += 1;
+                        spare -= 1;
+                    }
+                }
+                scaled
+            };
+
+            let constraints: Vec<Constraint> = widths
+                .iter()
+                .map(|&w| Constraint::Length(w as u16))
                 .collect();
 
             // Header row
