@@ -12,6 +12,7 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::{action::Action, app::View, ui::styles::Theme};
 
+pub mod cwlogs;
 pub mod dynamodb;
 pub mod lambda;
 pub mod navigator;

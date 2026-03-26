@@ -32,12 +32,7 @@ async fn main() -> Result<()> {
     register(services::dynamodb::DynamoDbService);
     register(services::lambda::LambdaService);
     register(services::sqs::SqsService);
-    register(services::PlaceholderService {
-        name: "CloudWatch Logs",
-        short_name: "cwlogs",
-        description: "Tail and search log groups and streams",
-        icon: "📋",
-    });
+    register(services::cwlogs::CwlService);
 
     // Load AWS config (default profile / env vars).
     let cfg = load_default().await?;

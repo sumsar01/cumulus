@@ -2,8 +2,8 @@ use aws_types::SdkConfig;
 use crossterm::event::KeyEvent;
 
 use crate::{
-    app::View, services::dynamodb::DdbAction, services::lambda::LambdaAction,
-    services::sqs::SqsAction,
+    app::View, services::cwlogs::CwlAction, services::dynamodb::DdbAction,
+    services::lambda::LambdaAction, services::sqs::SqsAction,
 };
 
 /// Top-level actions that flow through the application.
@@ -50,4 +50,6 @@ pub enum Action {
     Lambda(LambdaAction),
     /// SQS service actions.
     Sqs(SqsAction),
+    /// CloudWatch Logs service actions.
+    CloudWatchLogs(CwlAction),
 }
