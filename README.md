@@ -2,7 +2,7 @@
 
 A terminal UI for AWS. Browse and manage AWS services without leaving your terminal.
 
-![Go version](https://img.shields.io/badge/go-1.21+-blue)
+![Rust](https://img.shields.io/badge/rust-2021-orange)
 
 ## Supported services
 
@@ -13,21 +13,18 @@ A terminal UI for AWS. Browse and manage AWS services without leaving your termi
 
 ## Install
 
-```sh
-go install github.com/sumsar01/cumulus@latest
-```
-
-Or build from source:
+Build from source:
 
 ```sh
 git clone https://github.com/sumsar01/cumulus
 cd cumulus
-go build -o cumulus .
+cargo build --release
+# binary at target/release/cumulus
 ```
 
 ## Requirements
 
-- Go 1.21+
+- Rust 1.80+
 - AWS credentials configured (SSO, environment variables, or `~/.aws/credentials`)
 - A terminal with colour support
 
@@ -225,13 +222,7 @@ The binary is validated at config load time and again at exec time. It is never 
 
 ## Adding services
 
-cumulus uses a service plugin pattern. Each AWS service is a self-contained package implementing the `Service` interface (`internal/services/service.go`). To add a new service, implement the interface and register it in `main.go`:
-
-```go
-services.Register(myservice.Svc{})
-```
-
-No other files need to change.
+cumulus uses a service module pattern. Each AWS service is a self-contained module under `src/services/`. To add a new service, implement the service trait and register it in `src/services/mod.rs`. Each service owns its views and API helpers.
 
 ## License
 

@@ -7,7 +7,7 @@
 cumulus
 
 # Rust build artifacts
-cumulus-rs/target/
+target/
 
 # ── Accidental secrets / credentials ─────────────────────────────────────────
 # Environment variable files
