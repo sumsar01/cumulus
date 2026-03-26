@@ -8,9 +8,9 @@ use aws_sdk_lambda::{operation::get_function::GetFunctionOutput, types::Function
 use aws_types::SdkConfig;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::Rect,
     text::{Line, Span},
-    widgets::Paragraph,
+    widgets::{Block, BorderType, Padding, Paragraph},
     Frame,
 };
 use tokio::sync::mpsc::UnboundedSender;
@@ -20,7 +20,7 @@ use crate::{
     app::View,
     services::lambda::{api::spawn_fetch_function_detail, LambdaAction},
     ui::{
-        helpers::{horizontal_sep, pad_right, render_hints},
+        helpers::{pad_right, render_hints},
         spinner::{Spinner, SpinnerStyle},
         styles::Theme,
     },
@@ -331,20 +331,7 @@ impl View for DetailView {
     }
 
     fn draw(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
-        // ── Layout: title(1) + sep(1) + viewport(min) + hints(1) ─────────────
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(1), // title
-                Constraint::Length(1), // sep
-                Constraint::Min(0),    // content
-                Constraint::Length(1), // hints
-            ])
-            .split(area);
-
-        let viewport_h = chunks[2].height as usize;
-
-        // ── Title ─────────────────────────────────────────────────────────────
+        // ── Title for top border ──────────────────────────────────────────────
         let loading_span = if self.loading {
             Span::styled(
                 format!("  {}", self.spinner.symbol()),
@@ -354,21 +341,38 @@ impl View for DetailView {
             Span::raw("")
         };
         let title_line = Line::from(vec![
+            Span::raw(" "),
             Span::styled(self.function_name.clone(), theme.text_accent_style()),
             Span::styled("  — function detail", theme.text_dim_style()),
             loading_span,
+            Span::raw(" "),
         ]);
-        frame.render_widget(
-            Paragraph::new(title_line).style(theme.background_style()),
-            chunks[0],
-        );
 
-        // ── Separator ─────────────────────────────────────────────────────────
-        horizontal_sep(frame, chunks[1], theme);
+        // ── Hints for bottom border ───────────────────────────────────────────
+        let viewport_h_est = area.height.saturating_sub(2) as usize;
+        let pct = self.scroll_percent(viewport_h_est);
+        let scroll_label = format!("{pct}%");
+        let pairs: Vec<(&str, &str)> = vec![("↑/↓", "scroll"), ("r", "refresh"), ("esc", "back")];
+        let mut hint_spans: Vec<Span> = render_hints(&pairs, theme).spans;
+        hint_spans.push(Span::styled(
+            format!("   {scroll_label}"),
+            theme.text_dim_style(),
+        ));
+        let hints_line = Line::from(hint_spans);
 
-        // ── Clamp scroll and compute percent ─────────────────────────────────
+        // ── Bordered panel ────────────────────────────────────────────────────
+        let block = Block::bordered()
+            .border_type(BorderType::Rounded)
+            .border_style(theme.border_style())
+            .title(title_line)
+            .title_bottom(hints_line)
+            .style(theme.background_style())
+            .padding(Padding::horizontal(1));
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
+        let viewport_h = inner.height as usize;
         let eff_scroll = self.scroll.min(self.max_scroll(viewport_h));
-        let pct = self.scroll_percent(viewport_h);
 
         // ── Content viewport ──────────────────────────────────────────────────
         let visible: Vec<Line> = self
@@ -381,20 +385,7 @@ impl View for DetailView {
 
         frame.render_widget(
             Paragraph::new(visible).style(theme.background_style()),
-            chunks[2],
-        );
-
-        // ── Hints ─────────────────────────────────────────────────────────────
-        let pairs: Vec<(&str, &str)> = vec![("↑/↓", "scroll"), ("r", "refresh"), ("esc", "back")];
-        let scroll_label = format!("{pct}%");
-        let mut hint_spans: Vec<Span> = render_hints(&pairs, theme).spans;
-        hint_spans.push(Span::styled(
-            format!("   {scroll_label}"),
-            theme.text_dim_style(),
-        ));
-        frame.render_widget(
-            Paragraph::new(Line::from(hint_spans)).style(theme.background_style()),
-            chunks[3],
+            inner,
         );
     }
 }

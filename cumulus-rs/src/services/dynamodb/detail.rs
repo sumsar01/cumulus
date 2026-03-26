@@ -8,10 +8,10 @@ use std::collections::HashMap;
 use aws_sdk_dynamodb::types::AttributeValue;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::Paragraph,
+    widgets::{Block, BorderType, Padding, Paragraph},
     Frame,
 };
 use tokio::sync::mpsc::UnboundedSender;
@@ -21,7 +21,6 @@ use crate::{
     app::View,
     services::dynamodb::attrs::item_to_json_string,
     ui::{
-        helpers::horizontal_sep,
         styles::Theme,
     },
 };
@@ -94,25 +93,9 @@ impl View for DetailView {
     }
 
     fn draw(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
-        let height = area.height;
-
-        // Layout: title(1) + sep(1) + content(N) + hints(1)
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(1),
-                Constraint::Length(1),
-                Constraint::Min(0),
-                Constraint::Length(1),
-            ])
-            .split(area);
-
-        let viewport_h = chunks[2].height;
-        let max_scroll = self.max_scroll(viewport_h);
-        let scroll = self.scroll.min(max_scroll);
-
-        // Title
+        // ── Title for top border ──────────────────────────────────────────────
         let title_line = Line::from(vec![
+            Span::raw(" "),
             Span::styled(
                 self.table_name.clone(),
                 Style::default()
@@ -120,13 +103,37 @@ impl View for DetailView {
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled("  — item detail", theme.text_dim_style()),
+            Span::raw(" "),
         ]);
-        frame.render_widget(
-            Paragraph::new(title_line).style(theme.background_style()),
-            chunks[0],
-        );
 
-        horizontal_sep(frame, chunks[1], theme);
+        // ── Hints for bottom border ───────────────────────────────────────────
+        let pct = self.scroll_percent(area.height.saturating_sub(2));
+        let hints_line = Line::from(vec![
+            Span::raw("  "),
+            Span::styled("↑/↓", theme.key_badge_style()),
+            Span::styled(" scroll   ", theme.key_desc_style()),
+            Span::styled("y", theme.key_badge_style()),
+            Span::styled(" copy JSON   ", theme.key_desc_style()),
+            Span::styled("esc", theme.key_badge_style()),
+            Span::styled(" back", theme.key_desc_style()),
+            Span::styled(format!("  {:3}%", pct), theme.text_dim_style()),
+            Span::raw(" "),
+        ]);
+
+        // ── Bordered panel ────────────────────────────────────────────────────
+        let block = Block::bordered()
+            .border_type(BorderType::Rounded)
+            .border_style(theme.border_style())
+            .title(title_line)
+            .title_bottom(hints_line)
+            .style(theme.background_style())
+            .padding(Padding::horizontal(1));
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
+        let viewport_h = inner.height;
+        let max_scroll = self.max_scroll(viewport_h);
+        let scroll = self.scroll.min(max_scroll);
 
         // Content — render only visible lines.
         let start = scroll as usize;
@@ -138,22 +145,7 @@ impl View for DetailView {
 
         frame.render_widget(
             Paragraph::new(visible).style(theme.background_style()),
-            chunks[2],
-        );
-
-        // Hints
-        let pct = self.scroll_percent(viewport_h);
-        let hints_line = Line::from(vec![
-            Span::styled("  ↑/↓ scroll  ", theme.key_desc_style()),
-            Span::styled("y", theme.key_badge_style()),
-            Span::styled(" copy JSON  ", theme.key_desc_style()),
-            Span::styled("esc", theme.key_badge_style()),
-            Span::styled(" back", theme.key_desc_style()),
-            Span::styled(format!("  {:3}%", pct), theme.text_dim_style()),
-        ]);
-        frame.render_widget(
-            Paragraph::new(hints_line).style(theme.background_style()),
-            chunks[3],
+            inner,
         );
     }
 }

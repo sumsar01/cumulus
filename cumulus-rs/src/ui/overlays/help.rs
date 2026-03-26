@@ -4,7 +4,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::Rect,
     text::{Line, Span},
-    widgets::{Block, Clear, Paragraph},
+    widgets::{Block, BorderType, Clear, Paragraph},
     Frame,
 };
 use tokio::sync::mpsc::UnboundedSender;
@@ -29,7 +29,7 @@ impl HelpOverlay {
 
     pub fn draw(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
         let box_w: u16 = 62.min(area.width);
-        let box_h: u16 = 34.min(area.height);
+        let box_h: u16 = 32.min(area.height);
         let x = area.x + area.width.saturating_sub(box_w) / 2;
         let y = area.y + area.height.saturating_sub(box_h) / 2;
         let popup = Rect {
@@ -39,18 +39,29 @@ impl HelpOverlay {
             height: box_h,
         };
 
-        frame.render_widget(Clear, popup);
-        frame.render_widget(
-            Block::default().style(theme.background_style().bg(theme.border.into())),
-            popup,
-        );
+        let title_line = Line::from(vec![
+            Span::raw(" "),
+            Span::styled("keyboard shortcuts", theme.text_accent_style()),
+            Span::raw(" "),
+        ]);
+        let hints_line = Line::from(vec![
+            Span::raw("  "),
+            Span::styled("?", theme.key_badge_style()),
+            Span::styled(" or ", theme.key_desc_style()),
+            Span::styled("esc", theme.key_badge_style()),
+            Span::styled(" to close  ", theme.key_desc_style()),
+        ]);
 
-        let inner = Rect {
-            x: popup.x + 2,
-            y: popup.y + 1,
-            width: popup.width.saturating_sub(4),
-            height: popup.height.saturating_sub(2),
-        };
+        let block = Block::bordered()
+            .border_type(BorderType::Rounded)
+            .border_style(theme.border_style())
+            .title(title_line)
+            .title_bottom(hints_line)
+            .style(theme.background_style());
+        let inner = block.inner(popup);
+
+        frame.render_widget(Clear, popup);
+        frame.render_widget(block, popup);
 
         let dim = theme.text_dim_style();
         let accent = theme.text_accent_style();
@@ -68,8 +79,6 @@ impl HelpOverlay {
         let sep = || -> Line<'static> { Line::from(vec![Span::styled("─".repeat(54), dim)]) };
 
         let lines: Vec<Line> = vec![
-            Line::from(vec![Span::styled("keyboard shortcuts", accent)]),
-            sep(),
             header("Global"),
             row("ctrl+c", "quit"),
             row("p", "switch AWS profile"),
@@ -99,8 +108,6 @@ impl HelpOverlay {
             header("DynamoDB — Detail"),
             row("↑ / ↓", "scroll"),
             row("y", "copy JSON to clipboard"),
-            sep(),
-            Line::from(vec![Span::styled("?  or  esc  to close", dim)]),
         ];
 
         let para = Paragraph::new(lines).style(theme.background_style());

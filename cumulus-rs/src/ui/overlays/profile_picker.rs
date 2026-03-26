@@ -4,7 +4,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::Rect,
     text::{Line, Span},
-    widgets::{Block, Clear, List, ListItem, ListState, Paragraph},
+    widgets::{Block, BorderType, Clear, List, ListItem, ListState},
     Frame,
 };
 use tokio::sync::mpsc::UnboundedSender;
@@ -94,52 +94,43 @@ impl ProfilePicker {
     pub fn draw(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
         let box_w: u16 = 52.min(area.width);
         let profiles_h = (self.profiles.len() as u16).max(2).min(16);
-        let box_h: u16 = (profiles_h + 6).min(area.height);
+        let box_h: u16 = (profiles_h + 4).min(area.height);
         let x = area.x + area.width.saturating_sub(box_w) / 2;
         let y = area.y + area.height.saturating_sub(box_h) / 2;
         let popup = Rect { x, y, width: box_w, height: box_h };
 
-        frame.render_widget(Clear, popup);
-        frame.render_widget(Block::default().style(theme.background_style()), popup);
-
-        let inner = Rect {
-            x: popup.x + 2,
-            y: popup.y + 1,
-            width: popup.width.saturating_sub(4),
-            height: popup.height.saturating_sub(2),
-        };
-
-        // Title line
-        let title = Paragraph::new(Line::from(vec![
+        let title_line = Line::from(vec![
+            Span::raw(" "),
             Span::styled("switch profile", theme.text_accent_style()),
-            Span::raw("  "),
             Span::styled(
-                format!("{} profiles", self.profiles.len()),
+                format!("  {} profiles", self.profiles.len()),
                 theme.text_dim_style(),
             ),
-        ]));
-        frame.render_widget(
-            title,
-            Rect { x: inner.x, y: inner.y, width: inner.width, height: 1 },
-        );
+            Span::raw(" "),
+        ]);
+        let hints_line = Line::from(vec![
+            Span::raw("  "),
+            Span::styled("↑/↓", theme.key_badge_style()),
+            Span::styled(" navigate   ", theme.key_desc_style()),
+            Span::styled("enter", theme.key_badge_style()),
+            Span::styled(" select   ", theme.key_desc_style()),
+            Span::styled("esc", theme.key_badge_style()),
+            Span::styled(" cancel  ", theme.key_desc_style()),
+        ]);
 
-        // Separator
-        let sep = Paragraph::new("─".repeat(inner.width as usize))
-            .style(theme.text_dim_style());
-        frame.render_widget(
-            sep,
-            Rect { x: inner.x, y: inner.y + 1, width: inner.width, height: 1 },
-        );
+        let block = Block::bordered()
+            .border_type(BorderType::Rounded)
+            .border_style(theme.border_style())
+            .title(title_line)
+            .title_bottom(hints_line)
+            .style(theme.background_style());
+        let list_area = block.inner(popup);
 
-        // List area
-        let list_area = Rect {
-            x: inner.x,
-            y: inner.y + 2,
-            width: inner.width,
-            height: inner.height.saturating_sub(4),
-        };
+        frame.render_widget(Clear, popup);
+        frame.render_widget(block, popup);
 
         if self.loading {
+            use ratatui::widgets::Paragraph;
             frame.render_widget(
                 Paragraph::new("  loading profiles…").style(theme.text_dim_style()),
                 list_area,
@@ -174,13 +165,5 @@ impl ProfilePicker {
                 &mut state,
             );
         }
-
-        // Hint
-        let hint_y = inner.y + inner.height.saturating_sub(1);
-        frame.render_widget(
-            Paragraph::new("↑/↓  navigate   enter  select   esc  cancel")
-                .style(theme.text_dim_style()),
-            Rect { x: inner.x, y: hint_y, width: inner.width, height: 1 },
-        );
     }
 }

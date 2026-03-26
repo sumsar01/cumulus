@@ -9,7 +9,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::Paragraph,
+    widgets::{Block, BorderType, Padding, Paragraph},
     Frame,
 };
 use tokio::sync::mpsc::UnboundedSender;
@@ -18,11 +18,7 @@ use crate::{
     action::Action,
     app::View,
     services::dynamodb::{api::spawn_fetch_tables, items::ItemsView, DdbAction},
-    ui::{
-        helpers::{horizontal_sep, render_hints},
-        spinner::Spinner,
-        styles::Theme,
-    },
+    ui::{helpers::render_hints, spinner::Spinner, styles::Theme},
 };
 
 // ── TablesView ────────────────────────────────────────────────────────────────
@@ -189,9 +185,6 @@ impl View for TablesView {
     }
 
     fn draw(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
-        let width = area.width as usize;
-        let height = area.height;
-
         // ── Loading ───────────────────────────────────────────────────────────
         if self.loading {
             let msg = format!("{}  Loading tables…", self.spinner.symbol());
@@ -235,8 +228,9 @@ impl View for TablesView {
         let vis = self.visible();
         let total = self.tables.len();
 
-        // ── Header ────────────────────────────────────────────────────────────
-        let mut header_spans = vec![
+        // ── Title for top border ──────────────────────────────────────────────
+        let mut title_spans = vec![
+            Span::raw(" "),
             Span::styled(
                 "DynamoDB",
                 Style::default()
@@ -249,58 +243,59 @@ impl View for TablesView {
             ),
         ];
         if self.filter_active {
-            header_spans.push(Span::styled("  /", theme.key_badge_style()));
-            header_spans.push(Span::styled(
+            title_spans.push(Span::styled("  /", theme.key_badge_style()));
+            title_spans.push(Span::styled(
                 format!(" {}█", self.filter),
                 Style::default().fg(theme.text_accent),
             ));
         } else if !self.filter.is_empty() {
-            header_spans.push(Span::styled("  /", theme.key_badge_style()));
-            header_spans.push(Span::styled(
+            title_spans.push(Span::styled("  /", theme.key_badge_style()));
+            title_spans.push(Span::styled(
                 format!(" {}", self.filter),
                 Style::default().fg(theme.text_accent),
             ));
         }
-        let header_line = Line::from(header_spans);
+        title_spans.push(Span::raw(" "));
 
-        // ── Layout: header(1) + sep(1) + rows(N) + hints(1) ──────────────────
-        let hints_h = 1u16;
-        let fixed_h = 2 + hints_h;
-        let rows_h = height.saturating_sub(fixed_h).max(1);
+        // ── Hints for bottom border ───────────────────────────────────────────
+        let hint_pairs: &[(&str, &str)] = if self.filter_active {
+            &[("esc", "cancel filter"), ("enter", "confirm")]
+        } else {
+            &[
+                ("↑/↓", "navigate"),
+                ("enter", "open"),
+                ("/", "filter"),
+                ("r", "refresh"),
+            ]
+        };
 
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(1),
-                Constraint::Length(1),
-                Constraint::Length(rows_h),
-                Constraint::Length(hints_h),
-            ])
-            .split(area);
-
-        frame.render_widget(
-            Paragraph::new(header_line).style(theme.background_style()),
-            chunks[0],
-        );
-
-        horizontal_sep(frame, chunks[1], theme);
+        // ── Bordered panel ────────────────────────────────────────────────────
+        let block = Block::bordered()
+            .border_type(BorderType::Rounded)
+            .border_style(theme.border_style())
+            .title(Line::from(title_spans))
+            .title_bottom(render_hints(hint_pairs, theme))
+            .style(theme.background_style())
+            .padding(Padding::horizontal(1));
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
 
         // ── Rows ──────────────────────────────────────────────────────────────
-        let max_rows = rows_h as usize;
+        let max_rows = inner.height as usize;
         let start = if self.cursor >= max_rows {
             self.cursor - max_rows + 1
         } else {
             0
         };
         let end = (start + max_rows).min(vis.len());
+        let inner_w = inner.width as usize;
 
         let mut lines: Vec<Line> = Vec::new();
         for i in start..end {
             let name = vis[i];
             if i == self.cursor {
-                let pad = " ".repeat(width.saturating_sub(5 + name.len()));
+                let pad = " ".repeat(inner_w.saturating_sub(3 + name.len()));
                 lines.push(Line::from(vec![
-                    Span::styled("  ", Style::default().bg(theme.selection_bg)),
                     Span::styled(
                         "›",
                         Style::default()
@@ -319,7 +314,7 @@ impl View for TablesView {
                 ]));
             } else {
                 lines.push(Line::from(vec![
-                    Span::raw("     "),
+                    Span::raw("   "),
                     Span::styled(name, Style::default().fg(theme.text)),
                 ]));
             }
@@ -327,36 +322,13 @@ impl View for TablesView {
 
         if vis.is_empty() {
             let msg = if self.filter_active || !self.filter.is_empty() {
-                "     no tables match filter"
+                "   no tables match filter"
             } else {
-                "     no tables found"
+                "   no tables found"
             };
             lines.push(Line::from(Span::styled(msg, theme.text_dim_style())));
         }
 
-        while lines.len() < max_rows {
-            lines.push(Line::raw(""));
-        }
-
-        frame.render_widget(
-            Paragraph::new(lines).style(theme.background_style()),
-            chunks[2],
-        );
-
-        // ── Hints ─────────────────────────────────────────────────────────────
-        let hint_pairs: &[(&str, &str)] = if self.filter_active {
-            &[("esc", "cancel filter"), ("enter", "confirm")]
-        } else {
-            &[
-                ("↑/↓", "navigate"),
-                ("enter", "open"),
-                ("/", "filter"),
-                ("r", "refresh"),
-            ]
-        };
-        frame.render_widget(
-            Paragraph::new(render_hints(hint_pairs, theme)).style(theme.background_style()),
-            chunks[3],
-        );
+        frame.render_widget(Paragraph::new(lines).style(theme.background_style()), inner);
     }
 }

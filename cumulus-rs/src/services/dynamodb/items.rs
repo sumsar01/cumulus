@@ -13,7 +13,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Cell, Paragraph, Row, Table, TableState},
+    widgets::{Block, BorderType, Cell, Padding, Paragraph, Row, Table, TableState},
     Frame,
 };
 use tokio::sync::mpsc::UnboundedSender;
@@ -31,11 +31,7 @@ use crate::{
         prompt::{Prompt, PromptKind, PromptOutcome},
         DdbAction,
     },
-    ui::{
-        helpers::{horizontal_sep, render_hints},
-        spinner::Spinner,
-        styles::Theme,
-    },
+    ui::{helpers::render_hints, spinner::Spinner, styles::Theme},
 };
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -610,15 +606,16 @@ impl View for ItemsView {
 
 impl ItemsView {
     fn draw_table(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
-        let height = area.height;
-
-        // ── Header ────────────────────────────────────────────────────────────
-        let mut header_spans = vec![Span::styled(
-            self.table_name.clone(),
-            Style::default()
-                .fg(theme.text_accent)
-                .add_modifier(Modifier::BOLD),
-        )];
+        // ── Title for top border ──────────────────────────────────────────────
+        let mut title_spans = vec![
+            Span::raw(" "),
+            Span::styled(
+                self.table_name.clone(),
+                Style::default()
+                    .fg(theme.text_accent)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ];
 
         // Mode badge
         let mode_badge = if self.mode == ScanMode::Query {
@@ -630,10 +627,10 @@ impl ItemsView {
         } else {
             "  scan".to_string()
         };
-        header_spans.push(Span::styled(mode_badge, theme.text_dim_style()));
+        title_spans.push(Span::styled(mode_badge, theme.text_dim_style()));
 
         if !self.filter_expr.is_empty() {
-            header_spans.push(Span::styled(
+            title_spans.push(Span::styled(
                 format!("  expr: {}", self.filter_expr),
                 theme.text_dim_style(),
             ));
@@ -649,11 +646,11 @@ impl ItemsView {
                 "all"
             };
             let cursor = if self.local_filtering { "█" } else { "" };
-            header_spans.push(Span::styled(
+            title_spans.push(Span::styled(
                 format!("  / {}{}", self.local_filter, cursor),
                 Style::default().fg(theme.text_accent),
             ));
-            header_spans.push(Span::styled(
+            title_spans.push(Span::styled(
                 format!("  [{}]", col_name),
                 theme.text_dim_style(),
             ));
@@ -664,35 +661,47 @@ impl ItemsView {
         } else {
             format!("  page {}", self.current_page + 1)
         };
-        header_spans.push(Span::styled(page_label, theme.text_dim_style()));
+        title_spans.push(Span::styled(page_label, theme.text_dim_style()));
+        title_spans.push(Span::raw(" "));
 
-        let header_line = Line::from(header_spans);
+        // ── Hints for bottom border ───────────────────────────────────────────
+        let hint_pairs: &[(&str, &str)] = if self.local_filtering {
+            &[
+                ("esc", "cancel"),
+                ("enter", "confirm"),
+                ("tab", "change col"),
+            ]
+        } else {
+            &[
+                ("enter", "detail"),
+                ("e", "edit"),
+                ("n", "new"),
+                ("d", "delete"),
+                ("/", "filter"),
+                ("F", "expr"),
+                ("Q", "query"),
+                ("r", "refresh"),
+                ("←/→", "pages"),
+            ]
+        };
 
-        // ── Layout ────────────────────────────────────────────────────────────
-        let hints_h = 1u16;
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(1),       // header
-                Constraint::Length(1),       // sep
-                Constraint::Min(0),          // table
-                Constraint::Length(hints_h), // hints
-            ])
-            .split(area);
-
-        frame.render_widget(
-            Paragraph::new(header_line).style(theme.background_style()),
-            chunks[0],
-        );
-        horizontal_sep(frame, chunks[1], theme);
+        // ── Bordered panel ────────────────────────────────────────────────────
+        let block = Block::bordered()
+            .border_type(BorderType::Rounded)
+            .border_style(theme.border_style())
+            .title(Line::from(title_spans))
+            .title_bottom(render_hints(hint_pairs, theme))
+            .style(theme.background_style())
+            .padding(Padding::horizontal(1));
+        let table_area = block.inner(area);
+        frame.render_widget(block, area);
 
         // ── Table ─────────────────────────────────────────────────────────────
-        let table_area = chunks[2];
         let table_w = table_area.width as usize;
 
         if self.columns.is_empty() || self.filtered_items.is_empty() {
             frame.render_widget(
-                Paragraph::new("  no items").style(theme.text_dim_style()),
+                Paragraph::new(" no items").style(theme.text_dim_style()),
                 table_area,
             );
         } else {
@@ -761,31 +770,6 @@ impl ItemsView {
             let mut state = self.table_state.clone();
             frame.render_stateful_widget(table, table_area, &mut state);
         }
-
-        // ── Hints ─────────────────────────────────────────────────────────────
-        let hint_pairs: &[(&str, &str)] = if self.local_filtering {
-            &[
-                ("esc", "cancel"),
-                ("enter", "confirm"),
-                ("tab", "change col"),
-            ]
-        } else {
-            &[
-                ("enter", "detail"),
-                ("e", "edit"),
-                ("n", "new"),
-                ("d", "delete"),
-                ("/", "filter"),
-                ("F", "expr"),
-                ("Q", "query"),
-                ("r", "refresh"),
-                ("←/→", "pages"),
-            ]
-        };
-        frame.render_widget(
-            Paragraph::new(render_hints(hint_pairs, theme)).style(theme.background_style()),
-            chunks[3],
-        );
     }
 }
 
