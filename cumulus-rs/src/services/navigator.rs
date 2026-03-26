@@ -1,14 +1,16 @@
 //! Navigator — the home screen service picker.
 //!
-//! Shows all registered services in a scrollable list. Press `enter` to
-//! push a service view, `/` to filter by name, `j`/`k` or arrows to move.
+//! Shows all registered services in a two-pane layout: the left pane lists
+//! services (one line each), the right pane shows an expanded description of
+//! the currently selected service.  Press `enter` to push a service view,
+//! `/` to filter by name, `j`/`k` or arrows to move.
 
 use aws_types::SdkConfig;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout, Rect},
     text::{Line, Span},
-    widgets::{Block, List, ListItem, ListState, Paragraph},
+    widgets::{Block, BorderType, List, ListItem, ListState, Padding, Paragraph, Wrap},
     Frame,
 };
 use tokio::sync::mpsc::UnboundedSender;
@@ -17,7 +19,7 @@ use crate::{
     action::Action,
     app::View,
     services::{all_descriptors, init_service, ServiceDescriptor},
-    ui::{helpers::truncate, styles::Theme},
+    ui::{helpers::render_hints, styles::Theme},
 };
 
 // ── Navigator ─────────────────────────────────────────────────────────────────
@@ -32,9 +34,6 @@ pub struct Navigator {
     list_state: ListState,
     /// Current SDK config — passed to service init.
     cfg: SdkConfig,
-    /// Terminal dimensions.
-    width: u16,
-    height: u16,
     /// Filter string (empty = show all).
     filter: String,
     /// Whether the filter text box is active.
@@ -54,8 +53,6 @@ impl Navigator {
             visible,
             list_state,
             cfg,
-            width: 0,
-            height: 0,
             filter: String::new(),
             filter_active: false,
         }
@@ -162,122 +159,165 @@ impl View for Navigator {
             Action::RegionChanged { cfg, .. } => {
                 self.cfg = cfg.clone();
             }
-            Action::Resize(w, h) => {
-                self.width = *w;
-                self.height = *h;
-            }
             _ => {}
         }
         None
     }
 
     fn draw(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
-        // Centre a 66-wide panel.
-        let panel_w: u16 = 66.min(area.width);
-        let h_pad = area.width.saturating_sub(panel_w) / 2;
+        // ── Centre a fixed-size box in the terminal ───────────────────────────
+        // Total width capped at 100, split 38/62 between the two panes.
+        let box_w: u16 = 100.min(area.width);
+        // Height: enough for the list + 2 border rows; cap at terminal height.
+        let list_rows = self.visible.len() as u16;
+        let box_h: u16 = (list_rows + 2).max(14).min(area.height);
 
+        let x = area.x + area.width.saturating_sub(box_w) / 2;
+        let y = area.y + area.height.saturating_sub(box_h) / 2;
         let outer = Rect {
-            x: area.x + h_pad,
-            y: area.y,
-            width: panel_w,
-            height: area.height,
+            x,
+            y,
+            width: box_w,
+            height: box_h,
         };
 
-        // ── Vertical layout ──────────────────────────────────────────────────
-        // wordmark (1) + tagline (1) + gap (1) + list (N) + gap (1) + filter (1) + hints (1)
-        let list_h = (self.visible.len() as u16 * 2).min(outer.height.saturating_sub(8));
-        let total_inner = 1 + 1 + 1 + list_h + 1 + 1 + 1; // 7 + list rows
-        let v_pad = outer.height.saturating_sub(total_inner) / 2;
-
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
+        // ── Horizontal split: left list | gap | right detail ──────────────────
+        let cols = Layout::default()
+            .direction(Direction::Horizontal)
             .constraints([
-                Constraint::Length(v_pad),  // top padding
-                Constraint::Length(1),      // wordmark
-                Constraint::Length(1),      // tagline
-                Constraint::Length(1),      // gap
-                Constraint::Length(list_h), // list
-                Constraint::Length(1),      // gap
-                Constraint::Length(1),      // filter bar
-                Constraint::Length(1),      // hints
-                Constraint::Min(0),         // bottom padding
+                Constraint::Length(32),
+                Constraint::Length(1),
+                Constraint::Min(0),
             ])
             .split(outer);
 
-        // ── Wordmark ─────────────────────────────────────────────────────────
-        let wordmark = Paragraph::new("cumulus")
-            .style(theme.text_accent_style())
-            .alignment(Alignment::Center);
-        frame.render_widget(wordmark, chunks[1]);
+        let left_area = cols[0];
+        let right_area = cols[2];
 
-        // ── Tagline ───────────────────────────────────────────────────────────
-        let tagline = Paragraph::new("AWS in your terminal")
-            .style(theme.text_dim_style())
-            .alignment(Alignment::Center);
-        frame.render_widget(tagline, chunks[2]);
+        // ── Left pane — service list ──────────────────────────────────────────
+        let bottom_line: Line = if self.filter_active {
+            Line::from(vec![
+                Span::styled(" /", theme.text_accent_style()),
+                Span::styled(self.filter.as_str(), theme.text_style()),
+                Span::styled("█", theme.text_accent_style()),
+            ])
+        } else if !self.filter.is_empty() {
+            Line::from(vec![
+                Span::styled(" /", theme.text_dim_style()),
+                Span::styled(self.filter.as_str(), theme.text_dim_style()),
+            ])
+        } else {
+            render_hints(&[("↑/↓", "nav"), ("enter", "open"), ("/", "filter")], theme)
+        };
 
-        // ── Service list ──────────────────────────────────────────────────────
+        let left_block = Block::bordered()
+            .border_type(BorderType::Rounded)
+            .border_style(theme.border_style())
+            .title(Line::from(vec![
+                Span::raw(" "),
+                Span::styled("cumulus", theme.text_accent_style()),
+                Span::raw(" "),
+            ]))
+            .title_bottom(bottom_line)
+            .style(theme.background_style())
+            .padding(Padding::horizontal(1));
+
+        let list_area = left_block.inner(left_area);
+        frame.render_widget(left_block, left_area);
+
+        // ── Service list items (1 line each) ──────────────────────────────────
         let selected_idx = self.list_state.selected();
-        let item_w = (panel_w as usize).saturating_sub(4); // 2 for cursor + 2 padding
-
         let items: Vec<ListItem> = self
             .visible
             .iter()
             .enumerate()
             .map(|(i, svc)| {
                 let is_sel = selected_idx == Some(i);
-                let icon_name = format!("{}  {}", svc.icon, svc.name);
-                let desc = truncate(svc.description, item_w.saturating_sub(2));
-
-                let (cursor_span, name_span, desc_span) = if is_sel {
-                    (
-                        Span::styled("› ", theme.text_accent_style()),
-                        Span::styled(icon_name, theme.selection_style()),
-                        Span::styled(desc, theme.text_dim_style()),
-                    )
+                let (cursor, name_style) = if is_sel {
+                    ("›", theme.selection_style())
                 } else {
-                    (
-                        Span::styled("  ", theme.text_dim_style()),
-                        Span::styled(icon_name, theme.text_style()),
-                        Span::styled(desc, theme.text_dim_style()),
-                    )
+                    (" ", theme.text_style())
                 };
-
-                let name_line = Line::from(vec![cursor_span, name_span]);
-                let desc_line = Line::from(vec![Span::raw("  "), desc_span]);
-                ListItem::new(vec![name_line, desc_line])
+                let line = Line::from(vec![
+                    Span::styled(cursor, theme.text_accent_style()),
+                    Span::raw("  "),
+                    Span::styled(svc.icon, name_style),
+                    Span::raw("  "),
+                    Span::styled(svc.name, name_style),
+                ]);
+                ListItem::new(line)
             })
             .collect();
 
         let list = List::new(items).style(theme.background_style());
         let mut state = self.list_state.clone();
-        frame.render_stateful_widget(list, chunks[4], &mut state);
+        frame.render_stateful_widget(list, list_area, &mut state);
 
-        // ── Filter bar ────────────────────────────────────────────────────────
-        let filter_line = if self.filter_active {
-            Line::from(vec![
-                Span::styled("/", theme.text_accent_style()),
-                Span::styled(&self.filter, theme.text_style()),
-                Span::styled("█", theme.text_accent_style()),
-            ])
-        } else if !self.filter.is_empty() {
-            Line::from(vec![
-                Span::styled("/", theme.text_dim_style()),
-                Span::styled(&self.filter, theme.text_dim_style()),
-            ])
+        // ── Right pane — selected service detail ──────────────────────────────
+        let (right_title, right_icon, right_name, right_desc) = if let Some(idx) = selected_idx {
+            if let Some(svc) = self.visible.get(idx) {
+                (svc.name, svc.icon, svc.name, svc.description)
+            } else {
+                ("", "", "", "")
+            }
         } else {
-            Line::from("")
+            ("", "", "", "")
         };
-        frame.render_widget(
-            Paragraph::new(filter_line).alignment(Alignment::Center),
-            chunks[6],
+
+        let global_hints = render_hints(
+            &[
+                ("p", "profile"),
+                ("R", "region"),
+                ("t", "theme"),
+                ("?", "help"),
+            ],
+            theme,
         );
 
-        // ── Hints ─────────────────────────────────────────────────────────────
-        let hints = "↑/↓  navigate   enter  select   /  filter   p  profile   R  region   t  theme   ?  help";
-        let hints_p = Paragraph::new(hints)
-            .style(theme.text_dim_style())
-            .alignment(Alignment::Center);
-        frame.render_widget(hints_p, chunks[7]);
+        let right_block = Block::bordered()
+            .border_type(BorderType::Rounded)
+            .border_style(theme.border_dim_style())
+            .title(Line::from(vec![
+                Span::raw(" "),
+                Span::styled(right_title, theme.text_accent_style()),
+                Span::raw(" "),
+            ]))
+            .title_bottom(global_hints)
+            .style(theme.background_style())
+            .padding(Padding::horizontal(2));
+
+        let detail_area = right_block.inner(right_area);
+        frame.render_widget(right_block, right_area);
+
+        if detail_area.height < 3 || right_name.is_empty() {
+            return;
+        }
+
+        // Vertical layout inside right pane: blank(1) + icon/name(1) + blank(1) + desc(min)
+        let detail_chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1), // top breathing room
+                Constraint::Length(1), // icon + name
+                Constraint::Length(1), // gap
+                Constraint::Min(0),    // wrapped description
+            ])
+            .split(detail_area);
+
+        // Icon + name line
+        let name_line = Line::from(vec![
+            Span::styled(right_icon, theme.text_accent_style()),
+            Span::raw("  "),
+            Span::styled(right_name, theme.text_accent_style()),
+        ]);
+        frame.render_widget(Paragraph::new(name_line), detail_chunks[1]);
+
+        // Wrapped description
+        frame.render_widget(
+            Paragraph::new(right_desc)
+                .style(theme.text_dim_style())
+                .wrap(Wrap { trim: false }),
+            detail_chunks[3],
+        );
     }
 }
