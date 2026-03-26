@@ -27,6 +27,7 @@ use crate::{
 /// Scrollable detail view for a single CloudWatch log event.
 pub struct EventDetailView {
     event: LogEventInfo,
+    #[allow(dead_code)]
     group_name: String,
     stream_name: String,
     scroll: usize,

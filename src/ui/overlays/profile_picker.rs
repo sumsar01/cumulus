@@ -92,7 +92,7 @@ impl ProfilePicker {
     }
 
     pub fn draw(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
-        let profiles_h = (self.profiles.len() as u16).max(2).min(16);
+        let profiles_h = (self.profiles.len() as u16).clamp(2, 16);
         let box_h: u16 = profiles_h + 4;
         let popup = center_rect(area, 52, box_h);
 

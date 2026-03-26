@@ -53,6 +53,7 @@ pub struct Prompt {
     pub hint: String,
     pub input: String,
     /// For confirm prompts: `true` = "Yes" selected, `false` = "No".
+    #[allow(dead_code)]
     pub confirm_yes: bool,
 }
 

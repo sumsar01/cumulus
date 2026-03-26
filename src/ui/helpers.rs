@@ -30,13 +30,19 @@ pub fn center_rect(area: Rect, max_w: u16, max_h: u16) -> Rect {
     let h = max_h.min(area.height);
     let x = area.x + area.width.saturating_sub(w) / 2;
     let y = area.y + area.height.saturating_sub(h) / 2;
-    Rect { x, y, width: w, height: h }
+    Rect {
+        x,
+        y,
+        width: w,
+        height: h,
+    }
 }
 
 // ── Separator ─────────────────────────────────────────────────────────────────
 
 /// Render a full-width horizontal rule into `frame` at `y` (0-based row within
 /// the parent `area`).  Uses the theme's `separator` style.
+#[allow(dead_code)]
 pub fn horizontal_sep(frame: &mut Frame, area: Rect, theme: &Theme) {
     let sep = "─".repeat(area.width as usize);
     let paragraph = Paragraph::new(sep).style(theme.separator);
@@ -45,6 +51,7 @@ pub fn horizontal_sep(frame: &mut Frame, area: Rect, theme: &Theme) {
 
 /// Return a string of `width` horizontal-rule characters (for embedding in
 /// composed strings rather than rendering directly).
+#[allow(dead_code)]
 pub fn sep_string(width: usize) -> String {
     "─".repeat(width)
 }
@@ -111,6 +118,7 @@ pub fn pad_right(s: &str, width: usize) -> String {
 
 /// Apply a style to a full-width background by returning a space-padded
 /// styled span.  Useful for full-width row highlight without ANSI hacks.
+#[allow(dead_code)]
 pub fn full_width_span(text: &str, width: usize, style: Style) -> Span<'static> {
     let padded = pad_right(text, width);
     Span::styled(padded, style)
@@ -161,7 +169,12 @@ mod tests {
 
     #[test]
     fn center_rect_fits_when_smaller_than_max() {
-        let area = Rect { x: 0, y: 0, width: 80, height: 24 };
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 80,
+            height: 24,
+        };
         let r = center_rect(area, 120, 24);
         assert_eq!(r.width, 80);
         assert_eq!(r.height, 24);
@@ -170,7 +183,12 @@ mod tests {
 
     #[test]
     fn center_rect_caps_and_centres() {
-        let area = Rect { x: 0, y: 0, width: 200, height: 40 };
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 200,
+            height: 40,
+        };
         let r = center_rect(area, 120, 40);
         assert_eq!(r.width, 120);
         assert_eq!(r.x, 40); // (200-120)/2 = 40
@@ -178,7 +196,12 @@ mod tests {
 
     #[test]
     fn center_rect_with_offset_area() {
-        let area = Rect { x: 5, y: 2, width: 200, height: 40 };
+        let area = Rect {
+            x: 5,
+            y: 2,
+            width: 200,
+            height: 40,
+        };
         let r = center_rect(area, 120, 40);
         assert_eq!(r.x, 45); // 5 + (200-120)/2 = 5 + 40 = 45
         assert_eq!(r.y, 2);

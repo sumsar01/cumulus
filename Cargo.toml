@@ -1,0 +1,39 @@
+[package]
+name = "cumulus"
+version = "0.1.0"
+edition = "2021"
+description = "A terminal UI for AWS"
+
+[[bin]]
+name = "cumulus"
+path = "src/main.rs"
+
+[dependencies]
+ratatui = "0.29"
+crossterm = { version = "0.28", features = ["event-stream"] }
+tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
+futures = "0.3"
+aws-config = { version = "1", features = ["behavior-version-latest"] }
+aws-sdk-dynamodb = "1"
+aws-sdk-lambda = "1"
+aws-sdk-sqs = "1"
+aws-sdk-cloudwatchlogs = "1"
+aws-smithy-runtime-api = "1"
+aws-types = "1"
+serde_dynamo = { version = "4", features = ["aws-sdk-dynamodb+1"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+dirs = "5"
+anyhow = "1"
+thiserror = "2"
+base64 = "0.22"
+unicode-width = "0.2"
+tempfile = "3"
+
+[profile.release]
+opt-level = 3
+strip = "symbols"
+
+[dev-dependencies]

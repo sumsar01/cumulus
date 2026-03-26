@@ -28,25 +28,24 @@ use crate::{
         attrs::item_to_json_string,
         detail::DetailView,
         editor::{spawn_editor, EMPTY_ITEM_JSON},
-        prompt::{Prompt, PromptKind, PromptOutcome},
+        prompt::{Prompt, PromptOutcome},
         DdbAction,
     },
-    ui::{helpers::{center_rect, MAX_CONTENT_WIDTH, render_hints}, spinner::Spinner, styles::Theme},
+    ui::{
+        helpers::{center_rect, render_hints, MAX_CONTENT_WIDTH},
+        spinner::Spinner,
+        styles::Theme,
+    },
 };
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 /// Scan vs. Query mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ScanMode {
+    #[default]
     Scan,
     Query,
-}
-
-impl Default for ScanMode {
-    fn default() -> Self {
-        Self::Scan
-    }
 }
 
 /// Parameters bundle for `spawn_fetch_items`.
@@ -107,7 +106,6 @@ pub struct ItemsView {
     // Prompt overlay
     active_prompt: Option<Prompt>,
     prompt_purpose: Option<PromptPurpose>,
-
 }
 
 impl ItemsView {
@@ -737,7 +735,7 @@ impl ItemsView {
                         .map(|col| {
                             let val = item
                                 .get(col)
-                                .map(|v| attr_value_string(v))
+                                .map(attr_value_string)
                                 .unwrap_or_else(|| "—".to_string());
                             Cell::from(val).style(Style::default().fg(theme.text))
                         })

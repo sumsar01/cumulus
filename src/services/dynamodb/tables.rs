@@ -18,7 +18,11 @@ use crate::{
     action::Action,
     app::View,
     services::dynamodb::{api::spawn_fetch_tables, items::ItemsView, DdbAction},
-    ui::{helpers::{center_rect, MAX_CONTENT_WIDTH, render_hints}, spinner::Spinner, styles::Theme},
+    ui::{
+        helpers::{center_rect, render_hints, MAX_CONTENT_WIDTH},
+        spinner::Spinner,
+        styles::Theme,
+    },
 };
 
 // ── TablesView ────────────────────────────────────────────────────────────────
@@ -292,8 +296,8 @@ impl View for TablesView {
         let inner_w = inner.width as usize;
 
         let mut lines: Vec<Line> = Vec::new();
-        for i in start..end {
-            let name = vis[i];
+        for (i, name) in vis[start..end].iter().enumerate() {
+            let i = start + i; // absolute index for cursor comparison
             if i == self.cursor {
                 let pad = " ".repeat(inner_w.saturating_sub(3 + name.len()));
                 lines.push(Line::from(vec![
@@ -316,7 +320,7 @@ impl View for TablesView {
             } else {
                 lines.push(Line::from(vec![
                     Span::raw("   "),
-                    Span::styled(name, Style::default().fg(theme.text)),
+                    Span::styled(*name, Style::default().fg(theme.text)),
                 ]));
             }
         }

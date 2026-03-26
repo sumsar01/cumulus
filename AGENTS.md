@@ -2,10 +2,10 @@
 
 ## Project Overview
 
-**cumulus** — a terminal UI for AWS, built with [Bubble Tea](https://github.com/charmbracelet/bubbletea).
-Module: `github.com/sumsar01/cumulus` | Binary: `cumulus` | Repo: `cumulus`
+**cumulus** — a terminal UI for AWS, built with [Ratatui](https://ratatui.rs/).
+Binary: `cumulus` | Repo: `cumulus`
 
-Currently supports DynamoDB (browse, scan/query, edit items). Extensible via a service plugin interface.
+Currently supports DynamoDB (browse, scan/query, edit items), Lambda, CloudWatch Logs, and SQS. Extensible via a service module pattern.
 
 ---
 
@@ -13,28 +13,31 @@ Currently supports DynamoDB (browse, scan/query, edit items). Extensible via a s
 
 ```bash
 # Build
-go build -o cumulus .
+cargo build
+
+# Build release binary (output: target/release/cumulus)
+cargo build --release
 
 # Run without building
-go run .
+cargo run
 
 # Verify all packages compile
-go build ./...
+cargo check
 
-# Static analysis
-go vet ./...
+# Static analysis / lints
+cargo clippy
 
 # Run all tests
-go test ./...
+cargo test
 
-# Run a single test (by name, in a specific package)
-go test -run TestFunctionName ./internal/path/to/pkg/
+# Run a single test (by name)
+cargo test test_function_name
 
-# Run tests with verbose output
-go test -v ./...
+# Run tests with output
+cargo test -- --nocapture
 ```
 
-There is no Makefile, justfile, or CI pipeline. No linter config (`.golangci.yml`) exists yet.
+There is no Makefile, justfile, or CI pipeline. No clippy config exists yet.
 
 ---
 
@@ -42,115 +45,86 @@ There is no Makefile, justfile, or CI pipeline. No linter config (`.golangci.yml
 
 ### Imports
 
-Use `goimports` grouping: stdlib → external → internal, with blank lines between groups.
+Use standard Rust `use` declarations grouped: std → external crates → internal modules, with blank lines between groups.
 
-```go
-import (
-    "context"
-    "fmt"
+```rust
+use std::sync::Arc;
 
-    "github.com/aws/aws-sdk-go-v2/aws"
-    tea "github.com/charmbracelet/bubbletea"
+use anyhow::Result;
+use ratatui::widgets::Block;
 
-    awspkg "github.com/sumsar01/cumulus/internal/aws"
-    "github.com/sumsar01/cumulus/internal/ui"
-)
+use crate::config::Config;
+use crate::services::Service;
 ```
-
-Standard aliases: `tea` for `charmbracelet/bubbletea`, `awspkg` for `internal/aws`,
-`ddbtypes` for `aws-sdk-go-v2/service/dynamodb/types`.
 
 ### Formatting
 
-Standard `gofmt`. No custom formatting rules.
+Standard `rustfmt`. No custom formatting rules — run `cargo fmt` before committing.
 
 ### Naming
 
 | Thing | Convention | Example |
 |---|---|---|
-| Types | PascalCase | `TablesModel`, `ItemsModel` |
-| Tea message types | suffix `Msg` | `tablesLoadedMsg`, `ProfileChangedMsg`, `ErrMsg` |
-| Constructors | prefix `New` | `NewTablesModel`, `NewSpinner` |
-| Tea command funcs | suffix `Cmd` | `fetchTablesCmd`, `putItemCmd` |
-| Internal bus messages | unexported | `tablesLoadedMsg`, `editorDoneMsg` |
+| Types / Traits | PascalCase | `TablesView`, `ServicePlugin` |
+| Async actions / events | descriptive enum variants | `Action::FetchTables`, `Event::Key` |
+| Constructors | `new` or `default` | `TablesView::new()` |
+| Modules | snake_case | `dynamodb`, `cwlogs` |
+| Error variants | PascalCase | `AwsError`, `ConfigError` |
 
 ### Error Handling
 
-- Always wrap with context: `fmt.Errorf("fetchTables: %w", err)`
-- Propagate async errors to the Tea message bus: `awspkg.ErrMsg{Err: err}`
-- Use `errors.Is(err, os.ErrNotExist)` for sentinel checks
-- Annotate security-reviewed calls: `// #nosec G304` (file reads), `// #nosec G204` (exec)
-- No `panic()` in production code
+- Use `anyhow::Result` for application-level errors; `thiserror` for library-facing error types
+- Always add context: `.context("fetching tables")`  or  `anyhow::bail!("fetchTables: {err}")`
+- No `unwrap()` / `expect()` in production code paths (use `?` or explicit error handling)
+- Annotate intentional panics with a comment explaining the invariant
 
 ### Comments
 
-- Godoc comment on every exported symbol
+- Doc comment on every public item: `/// Short summary.`
 - Section dividers: `// ── Section name ────────────────────────────────────────`
 - Inline rationale for security decisions (why IMDS is disabled, why editor is allowlisted, etc.)
-
-### Structs and Receivers
-
-- Models are value types; pass by value
-- Pointer receivers only for mutation helpers (e.g. `reset()`, `rebuildTable()`)
-- `Init()` and `View()` use value receivers; `Update()` returns `(tea.Model, tea.Cmd)`
 
 ---
 
 ## Architecture
 
-### Bubble Tea Elm Pattern
+### Ratatui Event Loop
 
-All UI models implement `tea.Model` (`Init`, `Update`, `View`). The root `App` model maintains
-a view stack (`App.stack []tea.Model`). Navigation uses `PushMsg`/`PopMsg`.
+The app runs an async event loop (`app.rs`). UI components are structs implementing a common draw/update interface. Navigation uses an `Action` enum dispatched through a central handler.
 
 ```
 App (root)
- └─ stack: [Navigator | TablesModel | ItemsModel | DetailModel | ...]
+ └─ services: [Navigator | DynamoDB | Lambda | CloudWatchLogs | SQS]
 ```
 
 ### Async AWS I/O
 
-All AWS calls are async via `tea.Cmd` closures that return typed `tea.Msg` values.
-Never block in `Update()`.
+All AWS calls are async via `tokio` tasks. Results are sent back via an `mpsc` channel as `Action` variants. Never block the render loop.
 
-```go
-func fetchTablesCmd(ctx context.Context, client *dynamodb.Client) tea.Cmd {
-    return func() tea.Msg {
-        // ... AWS call ...
-        return tablesLoadedMsg{tables: out.TableNames}
-    }
-}
+```rust
+tokio::spawn(async move {
+    let tables = client.list_tables().send().await?;
+    tx.send(Action::TablesLoaded(tables.table_names)).await?;
+    Ok::<_, anyhow::Error>(())
+});
 ```
 
-### Service Plugin Pattern
+### Service Module Pattern
 
-Add a new AWS service by implementing the `Service` interface in `internal/services/`:
-
-```go
-type Service interface {
-    Name() string
-    ShortName() string
-    Description() string
-    Icon() string
-    Init(cfg aws.Config) (tea.Model, tea.Cmd)
-}
-```
-
-Register in `main.go` with `services.Register(...)`. No other files need changing.
+Add a new AWS service by creating a module under `src/services/` and registering it in `src/services/mod.rs`. Each service owns its views and API helpers.
 
 ### Profile Switching
 
-Profile changes broadcast `ProfileChangedMsg` to the entire stack so all models can reinitialise
-their AWS clients.
+Profile/region changes rebuild the AWS config and reinitialise all service clients.
 
 ---
 
 ## Security Conventions
 
 - **Editor allowlist**: only `nvim`, `vim`, `vi`, `nano`, `emacs`, `hx`, `micro` are accepted in config
-- **No shell interpolation**: editor commands are passed as `exec.Command(binary, args...)`, never through a shell
-- **IMDS disabled**: AWS SDK config sets `EC2IMDSClientEnableState: imds.ClientDisabled`
-- **`// #nosec` annotations**: all `gosec` suppressions are documented with a comment explaining why it is safe
+- **No shell interpolation**: editor commands are spawned via `std::process::Command` with args as a slice, never through a shell
+- **IMDS disabled**: AWS SDK config disables EC2 IMDS endpoint
+- Document any unsafe blocks or security-sensitive decisions with an inline comment
 
 ---
 

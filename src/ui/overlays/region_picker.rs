@@ -1,6 +1,5 @@
 //! Region picker overlay — lists known AWS regions for switching.
 
-use aws_types::SdkConfig;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::Rect,
@@ -10,7 +9,11 @@ use ratatui::{
 };
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::{action::Action, aws::spawn_switch_region, ui::{helpers::center_rect, styles::Theme}};
+use crate::{
+    action::Action,
+    aws::spawn_switch_region,
+    ui::{helpers::center_rect, styles::Theme},
+};
 
 use super::OverlayOutcome;
 
