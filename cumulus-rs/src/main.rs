@@ -30,12 +30,7 @@ async fn main() -> Result<()> {
 
     // Register all services before starting the TUI.
     register(services::dynamodb::DynamoDbService);
-    register(services::PlaceholderService {
-        name: "Lambda",
-        short_name: "lambda",
-        description: "Browse and invoke Lambda functions",
-        icon: "λ",
-    });
+    register(services::lambda::LambdaService);
     register(services::PlaceholderService {
         name: "SQS",
         short_name: "sqs",

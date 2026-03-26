@@ -1,7 +1,7 @@
 use aws_types::SdkConfig;
 use crossterm::event::KeyEvent;
 
-use crate::{app::View, services::dynamodb::DdbAction};
+use crate::{app::View, services::dynamodb::DdbAction, services::lambda::LambdaAction};
 
 /// Top-level actions that flow through the application.
 ///
@@ -43,4 +43,6 @@ pub enum Action {
     ProfilesLoaded(Vec<String>),
     /// DynamoDB service actions (tables, items, operations).
     DynamoDB(DdbAction),
+    /// Lambda service actions.
+    Lambda(LambdaAction),
 }
