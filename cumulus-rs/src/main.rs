@@ -31,12 +31,7 @@ async fn main() -> Result<()> {
     // Register all services before starting the TUI.
     register(services::dynamodb::DynamoDbService);
     register(services::lambda::LambdaService);
-    register(services::PlaceholderService {
-        name: "SQS",
-        short_name: "sqs",
-        description: "Browse queues, send and receive messages",
-        icon: "📨",
-    });
+    register(services::sqs::SqsService);
     register(services::PlaceholderService {
         name: "CloudWatch Logs",
         short_name: "cwlogs",

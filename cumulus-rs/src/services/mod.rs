@@ -15,6 +15,7 @@ use crate::{action::Action, app::View, ui::styles::Theme};
 pub mod dynamodb;
 pub mod lambda;
 pub mod navigator;
+pub mod sqs;
 
 // ── Service trait ─────────────────────────────────────────────────────────────
 

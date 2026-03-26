@@ -1,7 +1,10 @@
 use aws_types::SdkConfig;
 use crossterm::event::KeyEvent;
 
-use crate::{app::View, services::dynamodb::DdbAction, services::lambda::LambdaAction};
+use crate::{
+    app::View, services::dynamodb::DdbAction, services::lambda::LambdaAction,
+    services::sqs::SqsAction,
+};
 
 /// Top-level actions that flow through the application.
 ///
@@ -45,4 +48,6 @@ pub enum Action {
     DynamoDB(DdbAction),
     /// Lambda service actions.
     Lambda(LambdaAction),
+    /// SQS service actions.
+    Sqs(SqsAction),
 }
