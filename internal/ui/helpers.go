@@ -6,6 +6,21 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 )
 
+// MaxContentWidth is the maximum width (in columns) that any content pane will
+// occupy. On terminals wider than this the content is centered with background
+// padding on both sides.
+const MaxContentWidth = 120
+
+// EffectiveWidth returns the content width to use for layout given the actual
+// terminal width. It caps at MaxContentWidth so that wide terminals don't
+// stretch content uncomfortably across the full screen.
+func EffectiveWidth(termWidth int) int {
+	if termWidth < MaxContentWidth {
+		return termWidth
+	}
+	return MaxContentWidth
+}
+
 // NewSpinner returns a spinner pre-configured with the cumulus theme.
 func NewSpinner() spinner.Model {
 	sp := spinner.New()

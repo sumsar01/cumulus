@@ -9,6 +9,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // PushMsg asks the app to push a new model onto the view stack.
@@ -82,11 +83,13 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		a.width = msg.Width
 		a.height = msg.Height
-		a.status.Width = msg.Width
+		effectiveW := EffectiveWidth(msg.Width)
+		a.status.Width = effectiveW
 		// Propagate to active view (minus status bar height).
 		// Reserve 2 lines: 1 for the main bar + 1 for the optional error line.
+		// Cap content width at MaxContentWidth so wide terminals don't stretch the UI.
 		if len(a.stack) > 0 {
-			inner := tea.WindowSizeMsg{Width: msg.Width, Height: msg.Height - 2}
+			inner := tea.WindowSizeMsg{Width: effectiveW, Height: msg.Height - 2}
 			updated, cmd := a.top().Update(inner)
 			a.setTop(updated)
 			cmds = append(cmds, cmd)
@@ -160,7 +163,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case PushMsg:
 		a.stack = append(a.stack, msg.Model)
 		// Immediately size the new model to the current terminal dimensions.
-		inner := tea.WindowSizeMsg{Width: a.width, Height: a.height - 2}
+		effectiveW := EffectiveWidth(a.width)
+		inner := tea.WindowSizeMsg{Width: effectiveW, Height: a.height - 2}
 		updated, sizeCmd := a.top().Update(inner)
 		a.setTop(updated)
 		return a, tea.Batch(updated.Init(), sizeCmd)
@@ -210,7 +214,17 @@ func (a App) View() string {
 		body = a.themePicker.View(a.width, a.height-1)
 	}
 
-	return body + "\n" + a.status.View()
+	// Combine content and status bar, then center the whole block horizontally
+	// within the full terminal width. On terminals narrower than MaxContentWidth
+	// this is a no-op. On wider terminals it pads both sides with the background
+	// colour so the UI sits in the middle of the screen.
+	combined := body + "\n" + a.status.View()
+	return lipgloss.Place(
+		a.width, a.height,
+		lipgloss.Center, lipgloss.Top,
+		combined,
+		lipgloss.WithWhitespaceBackground(ColorBg),
+	)
 }
 
 func (a *App) top() tea.Model {
