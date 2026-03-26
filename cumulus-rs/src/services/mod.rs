@@ -12,6 +12,7 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::{action::Action, app::View, ui::styles::Theme};
 
+pub mod dynamodb;
 pub mod navigator;
 
 // ── Service trait ─────────────────────────────────────────────────────────────
@@ -112,5 +113,35 @@ impl View for PlaceholderView {
         use ratatui::widgets::Paragraph;
         let msg = format!("{} — coming soon", self.name);
         frame.render_widget(Paragraph::new(msg).style(theme.text_dim_style()), area);
+    }
+}
+
+// ── Placeholder service ───────────────────────────────────────────────────────
+
+/// A stub [`Service`] for services not yet implemented.
+pub struct PlaceholderService {
+    pub name: &'static str,
+    pub short_name: &'static str,
+    pub description: &'static str,
+    pub icon: &'static str,
+}
+
+impl Service for PlaceholderService {
+    fn name(&self) -> &'static str {
+        self.name
+    }
+    fn short_name(&self) -> &'static str {
+        self.short_name
+    }
+    fn description(&self) -> &'static str {
+        self.description
+    }
+    fn icon(&self) -> &'static str {
+        self.icon
+    }
+    fn init(&self, _cfg: SdkConfig, _tx: UnboundedSender<Action>) -> Box<dyn View> {
+        Box::new(PlaceholderView {
+            name: self.name.to_string(),
+        })
     }
 }

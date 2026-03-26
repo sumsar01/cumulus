@@ -318,6 +318,14 @@ impl App {
                     overlay.handle_action(&action, tx);
                 }
             }
+            Action::DynamoDB(_) => {
+                // Forward DynamoDB async results to the active view.
+                if let Some(view) = self.stack.last_mut() {
+                    if let Some(a) = view.handle_action(&action, tx) {
+                        self.handle_action(a, tx);
+                    }
+                }
+            }
         }
     }
 }

@@ -10,68 +10,6 @@ use anyhow::Result;
 
 use crate::{app::App, aws::load_default, event::Tui, services::register};
 
-// ── Placeholder service stubs (will be replaced by real implementations) ──────
-
-struct DynamoDbService;
-impl services::Service for DynamoDbService {
-    fn name(&self) -> &'static str { "DynamoDB" }
-    fn short_name(&self) -> &'static str { "dynamodb" }
-    fn description(&self) -> &'static str { "Browse tables, scan/query items, edit records" }
-    fn icon(&self) -> &'static str { "⚡" }
-    fn init(
-        &self,
-        _cfg: aws_types::SdkConfig,
-        _tx: tokio::sync::mpsc::UnboundedSender<action::Action>,
-    ) -> Box<dyn app::View> {
-        Box::new(services::PlaceholderView { name: "DynamoDB".to_string() })
-    }
-}
-
-struct LambdaService;
-impl services::Service for LambdaService {
-    fn name(&self) -> &'static str { "Lambda" }
-    fn short_name(&self) -> &'static str { "lambda" }
-    fn description(&self) -> &'static str { "Browse and invoke Lambda functions" }
-    fn icon(&self) -> &'static str { "λ" }
-    fn init(
-        &self,
-        _cfg: aws_types::SdkConfig,
-        _tx: tokio::sync::mpsc::UnboundedSender<action::Action>,
-    ) -> Box<dyn app::View> {
-        Box::new(services::PlaceholderView { name: "Lambda".to_string() })
-    }
-}
-
-struct SqsService;
-impl services::Service for SqsService {
-    fn name(&self) -> &'static str { "SQS" }
-    fn short_name(&self) -> &'static str { "sqs" }
-    fn description(&self) -> &'static str { "Browse queues, send and receive messages" }
-    fn icon(&self) -> &'static str { "📨" }
-    fn init(
-        &self,
-        _cfg: aws_types::SdkConfig,
-        _tx: tokio::sync::mpsc::UnboundedSender<action::Action>,
-    ) -> Box<dyn app::View> {
-        Box::new(services::PlaceholderView { name: "SQS".to_string() })
-    }
-}
-
-struct CloudWatchLogsService;
-impl services::Service for CloudWatchLogsService {
-    fn name(&self) -> &'static str { "CloudWatch Logs" }
-    fn short_name(&self) -> &'static str { "cwlogs" }
-    fn description(&self) -> &'static str { "Tail and search log groups and streams" }
-    fn icon(&self) -> &'static str { "📋" }
-    fn init(
-        &self,
-        _cfg: aws_types::SdkConfig,
-        _tx: tokio::sync::mpsc::UnboundedSender<action::Action>,
-    ) -> Box<dyn app::View> {
-        Box::new(services::PlaceholderView { name: "CloudWatch Logs".to_string() })
-    }
-}
-
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 #[tokio::main]
@@ -91,10 +29,25 @@ async fn main() -> Result<()> {
     }));
 
     // Register all services before starting the TUI.
-    register(DynamoDbService);
-    register(LambdaService);
-    register(SqsService);
-    register(CloudWatchLogsService);
+    register(services::dynamodb::DynamoDbService);
+    register(services::PlaceholderService {
+        name: "Lambda",
+        short_name: "lambda",
+        description: "Browse and invoke Lambda functions",
+        icon: "λ",
+    });
+    register(services::PlaceholderService {
+        name: "SQS",
+        short_name: "sqs",
+        description: "Browse queues, send and receive messages",
+        icon: "📨",
+    });
+    register(services::PlaceholderService {
+        name: "CloudWatch Logs",
+        short_name: "cwlogs",
+        description: "Tail and search log groups and streams",
+        icon: "📋",
+    });
 
     // Load AWS config (default profile / env vars).
     let cfg = load_default().await?;

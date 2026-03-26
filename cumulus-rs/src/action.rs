@@ -1,7 +1,7 @@
 use aws_types::SdkConfig;
 use crossterm::event::KeyEvent;
 
-use crate::app::View;
+use crate::{app::View, services::dynamodb::DdbAction};
 
 /// Top-level actions that flow through the application.
 ///
@@ -41,4 +41,6 @@ pub enum Action {
     AwsError(String),
     /// Async result of listing AWS profiles (sent to the profile picker overlay).
     ProfilesLoaded(Vec<String>),
+    /// DynamoDB service actions (tables, items, operations).
+    DynamoDB(DdbAction),
 }
