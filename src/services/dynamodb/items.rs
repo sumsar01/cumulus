@@ -408,7 +408,7 @@ impl View for ItemsView {
                 self.active_prompt = Some(Prompt::filter());
                 self.prompt_purpose = Some(PromptPurpose::Filter);
             }
-            KeyCode::Char('Q') => {
+            KeyCode::Char('s') => {
                 let pk = self.key_info.pk.clone();
                 self.active_prompt = Some(Prompt::query_pk(&pk));
                 self.prompt_purpose = Some(PromptPurpose::QueryPK);
@@ -665,7 +665,7 @@ impl ItemsView {
                 ("d", "delete"),
                 ("/", "filter"),
                 ("F", "expr"),
-                ("Q", "query"),
+                ("s", "query"),
                 ("r", "refresh"),
                 ("←/→", "pages"),
             ]

@@ -78,6 +78,9 @@ pub struct App {
     status: Option<String>,
     /// Set to `true` to exit the main loop.
     pub should_quit: bool,
+    /// `true` after a bare `q`/`Q` press is awaiting a confirming second
+    /// press. Any other key cancels this and is handled normally.
+    pending_quit: bool,
 }
 
 impl App {
@@ -110,6 +113,7 @@ impl App {
             error: None,
             status: None,
             should_quit: false,
+            pending_quit: false,
         }
     }
 
@@ -215,10 +219,29 @@ impl App {
                     return;
                 }
 
+                // ── Pending-quit confirmation ─────────────────────────────────
+                // A bare `q`/`Q` arms this; ctrl+c always quits immediately and
+                // bypasses confirmation entirely.
+                if self.pending_quit {
+                    self.pending_quit = false;
+                    self.status = None;
+                    if matches!(key.code, KeyCode::Char('q') | KeyCode::Char('Q'))
+                        && !key.modifiers.contains(KeyModifiers::CONTROL)
+                    {
+                        self.should_quit = true;
+                        return;
+                    }
+                    // Any other key cancels the pending quit and falls through
+                    // to be handled normally below.
+                }
+
                 // ── Global shortcuts ─────────────────────────────────────────
                 match key.code {
-                    KeyCode::Char('q') | KeyCode::Char('Q') => {
-                        self.should_quit = true;
+                    KeyCode::Char('q') | KeyCode::Char('Q')
+                        if !key.modifiers.contains(KeyModifiers::CONTROL) =>
+                    {
+                        self.pending_quit = true;
+                        self.status = Some("Press q again to quit".to_string());
                         return;
                     }
                     KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
