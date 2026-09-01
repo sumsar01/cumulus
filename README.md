@@ -46,7 +46,7 @@ Credentials are resolved via the standard AWS SDK v2 chain — `aws sso login`, 
 | `r` | Switch AWS region |
 | `?` | Help overlay |
 | `Esc` | Go back |
-| `q` | Quit |
+| `q` | Quit (press twice to confirm) |
 
 ### DynamoDB — table list
 
@@ -67,7 +67,7 @@ Credentials are resolved via the standard AWS SDK v2 chain — `aws sso login`, 
 | `n` | New item |
 | `d` | Delete item |
 | `/` | Filter expression |
-| `Q` | Query by partition key |
+| `s` | Query by partition key |
 | `r` | Refresh (reset to scan) |
 | `pgdn` / `→` | Next page |
 | `pgup` / `←` | Previous page |

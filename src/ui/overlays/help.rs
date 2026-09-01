@@ -90,7 +90,7 @@ impl HelpOverlay {
             sep(),
             header("DynamoDB — Items"),
             row("r", "refresh"),
-            row("Q", "query by partition key"),
+            row("s", "query by partition key"),
             row("/", "filter expression"),
             row("n", "new item"),
             row("e", "edit selected item"),
